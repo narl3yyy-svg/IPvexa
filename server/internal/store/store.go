@@ -297,7 +297,8 @@ func (s *Store) SetUserHash(username, hash string) error {
 
 func (s *Store) UserByName(name string) (User, error) {
 	var u User
-	err := s.db.QueryRow(`SELECT id, username, hash, role FROM users WHERE username = ?`, name).Scan(&u.ID, &u.Username, &u.Hash, &u.Role)
+	// Usernames are case-insensitive ("Admin" = "admin").
+	err := s.db.QueryRow(`SELECT id, username, hash, role FROM users WHERE username = ? COLLATE NOCASE`, name).Scan(&u.ID, &u.Username, &u.Hash, &u.Role)
 	if errors.Is(err, sql.ErrNoRows) {
 		return u, ErrNotFound
 	}

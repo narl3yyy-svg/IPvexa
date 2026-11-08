@@ -131,8 +131,15 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "bad request")
 		return
 	}
-	u, err := s.Store.UserByName(req.Username)
-	if err != nil || bcrypt.CompareHashAndPassword([]byte(u.Hash), []byte(req.Password)) != nil {
+	u, err := s.Store.UserByName(strings.TrimSpace(req.Username))
+	ok := err == nil && bcrypt.CompareHashAndPassword([]byte(u.Hash), []byte(req.Password)) == nil
+	if !ok && err == nil {
+		// Passwords copied from a terminal often pick up a stray space or newline.
+		if t := strings.TrimSpace(req.Password); t != req.Password {
+			ok = bcrypt.CompareHashAndPassword([]byte(u.Hash), []byte(t)) == nil
+		}
+	}
+	if !ok {
 		time.Sleep(500 * time.Millisecond) // slow down guessing
 		writeErr(w, 401, "wrong username or password")
 		return
