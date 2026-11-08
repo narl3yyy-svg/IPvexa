@@ -219,6 +219,16 @@ void ApiClient::discover(const QJSValue &callback)
     handleReply(m_net.get(request("/api/discover")), callback);
 }
 
+void ApiClient::call(const QString &method, const QString &path, const QVariant &body, const QJSValue &callback)
+{
+    QNetworkRequest req = request(path);
+    QByteArray data;
+    if (body.isValid() && !body.isNull())
+        data = QJsonDocument::fromVariant(body).toJson(QJsonDocument::Compact);
+    QNetworkReply *reply = m_net.sendCustomRequest(req, method.toUtf8(), data);
+    handleReply(reply, callback);
+}
+
 QString ApiClient::snapshotUrl(int cameraId) const
 {
     return QString("%1/api/cameras/%2/snapshot?token=%3").arg(m_server).arg(cameraId).arg(m_token);

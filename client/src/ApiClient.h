@@ -53,6 +53,8 @@ public:
     Q_INVOKABLE void deleteCamera(int id, const QJSValue &callback);
     Q_INVOKABLE void discover(const QJSValue &callback);
     Q_INVOKABLE QString snapshotUrl(int cameraId) const;
+    // Generic JSON request: method "GET"/"POST"/"PUT"/"DELETE", path like "/api/cameras/3/ptz/move".
+    Q_INVOKABLE void call(const QString &method, const QString &path, const QVariant &body = {}, const QJSValue &callback = {});
 
     QString liveUrl(int cameraId, const QString &stream) const;
     QString playbackUrl(int cameraId, qint64 t, bool keyframesOnly, bool info) const;

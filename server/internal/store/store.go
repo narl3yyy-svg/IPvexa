@@ -25,6 +25,13 @@ type Camera struct {
 	RetentionDays int    `json:"retention_days"`
 	Enabled       bool   `json:"enabled"`
 	CreatedAt     int64  `json:"created_at"`
+
+	// PTZ over ONVIF. OnvifUser/OnvifPass are optional; when empty the
+	// credentials in MainURL are used. OnvifPass is never sent to clients.
+	PTZ       bool   `json:"ptz"`
+	OnvifPort int    `json:"onvif_port"`
+	OnvifUser string `json:"onvif_user"`
+	OnvifPass string `json:"onvif_pass,omitempty"`
 }
 
 type Segment struct {
@@ -85,6 +92,10 @@ var migrations = []string{
 		expires INTEGER NOT NULL
 	);
 	CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);`,
+	`ALTER TABLE cameras ADD COLUMN ptz INTEGER NOT NULL DEFAULT 0;
+	ALTER TABLE cameras ADD COLUMN onvif_port INTEGER NOT NULL DEFAULT 80;
+	ALTER TABLE cameras ADD COLUMN onvif_user TEXT NOT NULL DEFAULT '';
+	ALTER TABLE cameras ADD COLUMN onvif_pass TEXT NOT NULL DEFAULT '';`,
 }
 
 func Open(path string) (*Store, error) {
@@ -130,11 +141,11 @@ func (s *Store) migrate() error {
 
 // ---- cameras ----
 
-const camCols = `id, name, brand, main_url, sub_url, transport, record_mode, record_sub, retention_days, enabled, created_at`
+const camCols = `id, name, brand, main_url, sub_url, transport, record_mode, record_sub, retention_days, enabled, created_at, ptz, onvif_port, onvif_user, onvif_pass`
 
 func scanCamera(r interface{ Scan(...any) error }) (Camera, error) {
 	var c Camera
-	err := r.Scan(&c.ID, &c.Name, &c.Brand, &c.MainURL, &c.SubURL, &c.Transport, &c.RecordMode, &c.RecordSub, &c.RetentionDays, &c.Enabled, &c.CreatedAt)
+	err := r.Scan(&c.ID, &c.Name, &c.Brand, &c.MainURL, &c.SubURL, &c.Transport, &c.RecordMode, &c.RecordSub, &c.RetentionDays, &c.Enabled, &c.CreatedAt, &c.PTZ, &c.OnvifPort, &c.OnvifUser, &c.OnvifPass)
 	return c, err
 }
 
@@ -165,8 +176,9 @@ func (s *Store) Camera(id int64) (Camera, error) {
 
 func (s *Store) CreateCamera(c *Camera) error {
 	c.CreatedAt = time.Now().UnixMilli()
-	res, err := s.db.Exec(`INSERT INTO cameras (name, brand, main_url, sub_url, transport, record_mode, record_sub, retention_days, enabled, created_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?)`, c.Name, c.Brand, c.MainURL, c.SubURL, c.Transport, c.RecordMode, c.RecordSub, c.RetentionDays, c.Enabled, c.CreatedAt)
+	res, err := s.db.Exec(`INSERT INTO cameras (name, brand, main_url, sub_url, transport, record_mode, record_sub, retention_days, enabled, created_at, ptz, onvif_port, onvif_user, onvif_pass)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, c.Name, c.Brand, c.MainURL, c.SubURL, c.Transport, c.RecordMode, c.RecordSub, c.RetentionDays, c.Enabled, c.CreatedAt,
+		c.PTZ, c.OnvifPort, c.OnvifUser, c.OnvifPass)
 	if err != nil {
 		return err
 	}
@@ -175,8 +187,10 @@ func (s *Store) CreateCamera(c *Camera) error {
 }
 
 func (s *Store) UpdateCamera(c *Camera) error {
-	res, err := s.db.Exec(`UPDATE cameras SET name=?, brand=?, main_url=?, sub_url=?, transport=?, record_mode=?, record_sub=?, retention_days=?, enabled=? WHERE id=?`,
-		c.Name, c.Brand, c.MainURL, c.SubURL, c.Transport, c.RecordMode, c.RecordSub, c.RetentionDays, c.Enabled, c.ID)
+	res, err := s.db.Exec(`UPDATE cameras SET name=?, brand=?, main_url=?, sub_url=?, transport=?, record_mode=?, record_sub=?, retention_days=?, enabled=?,
+		ptz=?, onvif_port=?, onvif_user=?, onvif_pass=? WHERE id=?`,
+		c.Name, c.Brand, c.MainURL, c.SubURL, c.Transport, c.RecordMode, c.RecordSub, c.RetentionDays, c.Enabled,
+		c.PTZ, c.OnvifPort, c.OnvifUser, c.OnvifPass, c.ID)
 	if err != nil {
 		return err
 	}

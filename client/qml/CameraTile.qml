@@ -19,6 +19,19 @@ Rectangle {
     signal doubleClicked()
     signal dropped(int cameraId)
     signal closeRequested()
+    signal settingsRequested()
+
+    // Human-readable reason when the camera can't be streamed.
+    function offlineReason() {
+        var e = root.mainStatus && root.mainStatus.last_error ? root.mainStatus.last_error : ""
+        if (e.indexOf("401") >= 0 || e.toLowerCase().indexOf("unauthorized") >= 0)
+            return "Wrong camera login (RTSP username/password)"
+        if (e.indexOf("404") >= 0) return "Stream path not found — check the stream URL"
+        if (e.toLowerCase().indexOf("refused") >= 0) return "Camera refused the connection (RTSP port closed?)"
+        if (e.toLowerCase().indexOf("timed out") >= 0 || e.toLowerCase().indexOf("timeout") >= 0
+                || e.toLowerCase().indexOf("no route") >= 0) return "Camera unreachable on the network"
+        return e !== "" ? "Camera offline" : "No signal"
+    }
 
     color: "#050608"
     radius: 3
@@ -78,22 +91,26 @@ Rectangle {
                 anchors.horizontalCenter: parent.horizontalCenter
                 running: visible
                 visible: ["connecting", "loading", "reconnecting"].indexOf(player.state) >= 0
+                         && !(root.mainStatus && root.mainStatus.state === "offline")
                 width: 32; height: 32
             }
             Text {
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: {
+                    // If the server already knows the camera is down, say why instead of "Reconnecting…".
+                    if (root.mainStatus && root.mainStatus.state === "offline" && player.state !== "nodata" && player.state !== "loading")
+                        return root.offlineReason()
                     switch (player.state) {
                     case "connecting": return "Connecting…"
                     case "reconnecting": return "Reconnecting…"
                     case "loading": return "Loading recording…"
-                    case "offline": return root.mainStatus && root.mainStatus.last_error ? "Camera offline" : "No signal"
+                    case "offline": return root.offlineReason()
                     case "nodata": return "NO RECORDING"
                     case "idle": return root.cam && !root.cam.enabled ? "Disabled" : ""
                     default: return ""
                     }
                 }
-                color: player.state === "offline" ? Theme.live : Theme.textDim
+                color: player.state === "offline" || (root.mainStatus && root.mainStatus.state === "offline") ? Theme.live : Theme.textDim
                 font.pixelSize: 13
                 font.weight: Font.DemiBold
                 font.letterSpacing: player.state === "nodata" ? 2 : 0
@@ -150,13 +167,21 @@ Rectangle {
                 border.color: "#80ff4757"
                 Text { id: recText; anchors.centerIn: parent; text: "● REC"; color: Theme.live; font.pixelSize: 9; font.weight: Font.Bold }
             }
-            Text {
-                visible: hover.hovered
+            Rectangle {
+                visible: hover.hovered || root.selected
                 anchors.verticalCenter: parent.verticalCenter
-                text: "✕"
-                color: closeMa.containsMouse ? "white" : "#b0b6bf"
-                font.pixelSize: 13
-                MouseArea { id: closeMa; anchors.fill: parent; anchors.margins: -4; hoverEnabled: true; onClicked: root.closeRequested() }
+                width: 20; height: 20; radius: 4
+                color: closeMa.containsMouse ? "#c0ff4757" : "#80000000"
+                Text { anchors.centerIn: parent; text: "✕"; color: "white"; font.pixelSize: 12 }
+                MouseArea {
+                    id: closeMa
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    ToolTip.visible: containsMouse
+                    ToolTip.text: "Remove from layout (Delete)"
+                    ToolTip.delay: 500
+                    onClicked: root.closeRequested()
+                }
             }
         }
     }
@@ -180,12 +205,33 @@ Rectangle {
         }
     }
 
+    // PTZ pad: shown on the selected tile of a PTZ camera while viewing live.
+    PtzControls {
+        visible: root.hasCam && !!root.cam.ptz && root.selected && Clock.live && root.height > 230 && root.width > 260
+        cameraId: root.cameraId
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        anchors.margins: 10
+        z: 5
+    }
+
     HoverHandler { id: hover }
     MouseArea {
         anchors.fill: parent
         z: -1
-        onClicked: root.clicked()
-        onDoubleClicked: root.doubleClicked()
+        acceptedButtons: Qt.LeftButton | Qt.RightButton
+        onClicked: (mouse) => {
+            root.clicked()
+            if (mouse.button === Qt.RightButton && root.hasCam) tileMenu.popup()
+        }
+        onDoubleClicked: (mouse) => { if (mouse.button === Qt.LeftButton) root.doubleClicked() }
+    }
+    Menu {
+        id: tileMenu
+        MenuItem { text: "Remove from layout"; onTriggered: root.closeRequested() }
+        MenuItem { text: "Maximize / restore"; onTriggered: root.doubleClicked() }
+        MenuSeparator {}
+        MenuItem { text: "Camera settings…"; enabled: Api.role === "admin"; onTriggered: root.settingsRequested() }
     }
 
     DropArea {

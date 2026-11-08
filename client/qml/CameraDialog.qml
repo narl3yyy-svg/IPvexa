@@ -15,11 +15,16 @@ Dialog {
     property string errorText: ""
     property var discovered: []
     property bool discovering: false
+    property string ptzResult: ""
+    property bool ptzTesting: false
+    readonly property string brandKey: brands[brand.currentIndex] ? brands[brand.currentIndex].key : ""
 
     readonly property var brands: [
         { key: "dahua",     name: "Dahua / Amcrest / Lorex", main: "/cam/realmonitor?channel={ch}&subtype=0", sub: "/cam/realmonitor?channel={ch}&subtype=1", port: 554 },
-        { key: "openipc",   name: "OpenIPC firmware",        main: "/stream=0", sub: "/stream=1", port: 554 },
-        { key: "thingino",  name: "Thingino firmware (Wyze etc.)", main: "/ch0", sub: "/ch1", port: 554 },
+        { key: "openipc",   name: "OpenIPC firmware",        main: "/stream=0", sub: "/stream=1", port: 554, user: "root",
+          hint: "OpenIPC uses the camera's web login for video. For PTZ, PTZ must be enabled in the camera's ONVIF settings." },
+        { key: "thingino",  name: "Thingino firmware (Wyze etc.)", main: "/ch0", sub: "/ch1", port: 554, user: "thingino",
+          hint: "Thingino's video stream has its own login, separate from the root web login (factory default thingino / thingino). Check it in the camera's web page under the streamer / RTSP settings." },
         { key: "hikvision", name: "Hikvision / Annke",       main: "/Streaming/Channels/{ch}01", sub: "/Streaming/Channels/{ch}02", port: 554 },
         { key: "reolink",   name: "Reolink",                 main: "/h264Preview_0{ch}_main", sub: "/h264Preview_0{ch}_sub", port: 554 },
         { key: "uniview",   name: "Uniview",                 main: "/unicast/c{ch}/s0/live", sub: "/unicast/c{ch}/s1/live", port: 554 },
@@ -53,7 +58,12 @@ Dialog {
         ip.text = ""; user.text = cam ? "" : "admin"; pass.text = ""; channel.value = 1; port.value = 554
         mainUrl.text = cam ? cam.main_url : ""
         subUrl.text = cam ? cam.sub_url : ""
-        record.checked = cam ? cam.record_mode !== "off" : true
+        record.checked = cam ? cam.record_mode === "continuous" : false
+        ptz.checked = cam ? !!cam.ptz : false
+        onvifPort.value = cam && cam.onvif_port ? cam.onvif_port : 80
+        onvifUser.text = cam && cam.onvif_user ? cam.onvif_user : ""
+        onvifPass.text = ""
+        ptzResult = ""
         retention.value = cam ? cam.retention_days : 30
         tcp.currentIndex = cam && cam.transport === "udp" ? 1 : 0
         enabled_.checked = cam ? cam.enabled : true
@@ -75,8 +85,12 @@ Dialog {
             record_mode: record.checked ? "continuous" : "off",
             record_sub: false,
             retention_days: retention.value,
-            enabled: enabled_.checked
+            enabled: enabled_.checked,
+            ptz: ptz.checked,
+            onvif_port: onvifPort.value,
+            onvif_user: onvifUser.text.trim()
         }
+        if (onvifPass.text.length > 0) cam.onvif_pass = onvifPass.text
         if (camId > 0) cam.id = camId
         Api.saveCamera(cam, function (err) {
             if (err) root.errorText = err
@@ -102,7 +116,23 @@ Dialog {
                 Layout.columnSpan: 3
                 Layout.fillWidth: true
                 model: root.brands.map(function (b) { return b.name })
-                onActivated: root.buildUrls()
+                onActivated: {
+                    var b = root.brands[currentIndex]
+                    if (b.user && root.camId === 0) user.text = b.user
+                    root.buildUrls()
+                }
+            }
+
+            Item { visible: hintText.visible; width: 1; height: 1 }
+            Text {
+                id: hintText
+                visible: !!root.brands[brand.currentIndex] && !!root.brands[brand.currentIndex].hint
+                text: visible ? "ⓘ  " + root.brands[brand.currentIndex].hint : ""
+                Layout.columnSpan: 3
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                color: Theme.warn
+                font.pixelSize: 11
             }
 
             Label { text: "IP address" }
@@ -175,6 +205,59 @@ Dialog {
             TextField { id: mainUrl; Layout.fillWidth: true; placeholderText: "rtsp://user:pass@ip:554/…"; font.family: Theme.mono; font.pixelSize: 12 }
             Label { text: "Substream" }
             TextField { id: subUrl; Layout.fillWidth: true; placeholderText: "optional — low-res stream for grids"; font.family: Theme.mono; font.pixelSize: 12 }
+        }
+
+        Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
+
+        // ---- PTZ ----
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 10
+            Switch { id: ptz; text: "PTZ camera (pan / tilt / zoom)" }
+            Item { Layout.fillWidth: true }
+            Label { visible: ptz.checked; text: "ONVIF port" }
+            SpinBox { visible: ptz.checked; id: onvifPort; from: 1; to: 65535; value: 80; editable: true }
+        }
+        GridLayout {
+            visible: ptz.checked
+            columns: 4
+            columnSpacing: 10
+            rowSpacing: 8
+            Layout.fillWidth: true
+            Label { text: "ONVIF user" }
+            TextField { id: onvifUser; Layout.fillWidth: true; placeholderText: "same as stream login" }
+            Label { text: "ONVIF password" }
+            TextField {
+                id: onvifPass
+                Layout.fillWidth: true
+                echoMode: TextInput.Password
+                placeholderText: root.camId > 0 && onvifUser.text !== "" ? "unchanged" : "same as stream login"
+            }
+            Button {
+                Layout.columnSpan: 1
+                text: root.ptzTesting ? "Testing…" : "Test PTZ"
+                enabled: root.camId > 0 && !root.ptzTesting
+                ToolTip.visible: hovered && root.camId === 0
+                ToolTip.text: "Save the camera first, then test PTZ"
+                onClicked: {
+                    root.ptzTesting = true
+                    root.ptzResult = ""
+                    Api.call("GET", "/api/cameras/" + root.camId + "/ptz/check", null, function (err, data) {
+                        root.ptzTesting = false
+                        if (err) root.ptzResult = "✗ " + err
+                        else if (data.ok) root.ptzResult = "✓ PTZ works (" + data.presets + " presets)"
+                        else root.ptzResult = "✗ " + data.error
+                    })
+                }
+            }
+            Text {
+                Layout.columnSpan: 3
+                Layout.fillWidth: true
+                text: root.ptzResult !== "" ? root.ptzResult : "Save changes before testing."
+                color: root.ptzResult.indexOf("✓") === 0 ? Theme.online : root.ptzResult !== "" ? Theme.live : Theme.textFaint
+                wrapMode: Text.Wrap
+                font.pixelSize: 11
+            }
         }
 
         Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }

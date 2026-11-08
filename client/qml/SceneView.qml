@@ -16,6 +16,7 @@ Rectangle {
     signal slotMaximizeToggled(int index)
     signal cameraDropped(int slot, int cameraId)
     signal slotCleared(int index)
+    signal cameraSettingsRequested(int cameraId)
 
     readonly property real ratio: aspect === "4:3" ? 4 / 3 : aspect === "16:9" ? 16 / 9 : 0
     readonly property int cols: slots.cols || 1
@@ -52,6 +53,7 @@ Rectangle {
             onDoubleClicked: root.slotMaximizeToggled(index)
             onDropped: (camId) => root.cameraDropped(index, camId)
             onCloseRequested: root.slotCleared(index)
+            onSettingsRequested: root.cameraSettingsRequested(cameraId)
 
             Behavior on x { enabled: !tile.dragging; NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
             Behavior on y { enabled: !tile.dragging; NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }

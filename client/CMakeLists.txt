@@ -37,6 +37,7 @@ qt_add_qml_module(ipvexa
         qml/CameraDialog.qml
         qml/IconButton.qml
         qml/ToolText.qml
+        qml/PtzControls.qml
 )
 
 target_link_libraries(ipvexa PRIVATE

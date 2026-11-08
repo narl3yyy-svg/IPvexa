@@ -5,6 +5,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QElapsedTimer>
+#include <QLibrary>
 #include <QVideoFrameFormat>
 #include <chrono>
 #include <cstring>
@@ -48,6 +49,16 @@ int interruptCb(void *opaque)
 
 // Hardware decoders to try, best first: NVIDIA (CUDA/NVDEC), then Intel/AMD (VAAPI).
 const AVHWDeviceType kHwTypes[] = {AV_HWDEVICE_TYPE_CUDA, AV_HWDEVICE_TYPE_VAAPI};
+
+// Only try CUDA when the NVIDIA driver is installed; otherwise FFmpeg prints
+// "Cannot load libcuda.so.1" errors for every stream on Intel/AMD machines.
+bool hwTypeAvailable(AVHWDeviceType type)
+{
+    if (type != AV_HWDEVICE_TYPE_CUDA)
+        return true;
+    static const bool hasCuda = QLibrary("cuda", 1).load();
+    return hasCuda;
+}
 
 struct HwCtx {
     AVPixelFormat pixFmt = AV_PIX_FMT_NONE;
@@ -242,6 +253,8 @@ SessionResult runSession(VideoPlayer *p, Interrupt *intr, const QString &url, bo
 
     if (allowHw) {
         for (AVHWDeviceType type : kHwTypes) {
+            if (!hwTypeAvailable(type))
+                continue;
             for (int i = 0;; ++i) {
                 const AVCodecHWConfig *cfg = avcodec_get_hw_config(codec, i);
                 if (!cfg)

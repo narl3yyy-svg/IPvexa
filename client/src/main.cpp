@@ -19,7 +19,9 @@ int main(int argc, char *argv[])
     app.setApplicationVersion("0.1.0");
     app.setDesktopFileName("ipvexa");
 
-    av_log_set_level(AV_LOG_ERROR);
+    // FFmpeg's own messages (e.g. a camera's damaged first frames) are only useful when
+    // debugging; set IPVEXA_DEBUG=1 to see them.
+    av_log_set_level(qEnvironmentVariableIsEmpty("IPVEXA_DEBUG") ? AV_LOG_FATAL : AV_LOG_WARNING);
 
     // Fusion + a dark palette gives native-feeling, consistently dark controls on KDE and elsewhere.
     QQuickStyle::setStyle("Fusion");

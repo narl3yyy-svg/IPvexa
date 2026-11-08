@@ -250,6 +250,7 @@ Item {
                 onSlotMaximizeToggled: (i) => root.maximizedSlot = (root.maximizedSlot === i ? -1 : i)
                 onCameraDropped: (slot, camId) => root.setSlotCam(slot, camId)
                 onSlotCleared: (i) => root.setSlotCam(i, 0)
+                onCameraSettingsRequested: (id) => { cameraDialog.load(Theme.findCamera(Api.cameras, id)); cameraDialog.open() }
             }
         }
 
@@ -269,6 +270,7 @@ Item {
     Shortcut { sequence: "Left"; onActivated: Clock.step(-10000) }
     Shortcut { sequence: "Right"; onActivated: Clock.step(10000) }
     Shortcut { sequence: "L"; onActivated: Clock.goLive() }
+    Shortcut { sequences: [StandardKey.Delete]; onActivated: root.setSlotCam(root.selectedSlot, 0) }
 
     CameraDialog { id: cameraDialog; anchors.centerIn: parent }
 

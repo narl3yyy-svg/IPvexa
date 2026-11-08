@@ -31,6 +31,8 @@ type Server struct {
 	Cams    *camera.Manager
 	RecRoot string
 	FFmpeg  string
+
+	ptz ptzHub
 }
 
 type ctxKey struct{}
@@ -55,6 +57,12 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/cameras/{id}/timeline", auth("viewer", s.timeline))
 	mux.Handle("GET /api/cameras/{id}/playback", auth("viewer", s.playback))
 	mux.Handle("GET /api/discover", auth("admin", s.discover))
+	mux.Handle("GET /api/cameras/{id}/ptz/check", auth("operator", s.ptzCheck))
+	mux.Handle("POST /api/cameras/{id}/ptz/move", auth("operator", s.ptzMove))
+	mux.Handle("POST /api/cameras/{id}/ptz/stop", auth("operator", s.ptzStop))
+	mux.Handle("GET /api/cameras/{id}/ptz/presets", auth("viewer", s.ptzPresets))
+	mux.Handle("POST /api/cameras/{id}/ptz/goto", auth("operator", s.ptzGoto))
+	mux.Handle("POST /api/cameras/{id}/ptz/presets", auth("operator", s.ptzSavePreset))
 	return logRequests(mux)
 }
 
@@ -194,6 +202,7 @@ func (s *Server) listCameras(w http.ResponseWriter, r *http.Request) {
 	admin := currentUser(r).Role == "admin"
 	out := make([]cameraView, 0, len(cams))
 	for _, c := range cams {
+		c.OnvifPass = ""
 		if !admin {
 			c.MainURL, c.SubURL = redact(c.MainURL), redact(c.SubURL)
 		}
@@ -226,6 +235,7 @@ func (s *Server) getCamera(w http.ResponseWriter, r *http.Request) {
 	if currentUser(r).Role != "admin" {
 		c.MainURL, c.SubURL = redact(c.MainURL), redact(c.SubURL)
 	}
+	c.OnvifPass = ""
 	writeJSON(w, 200, cameraView{c, s.Cams.Status(c.ID)})
 }
 
@@ -242,9 +252,14 @@ func normalize(c *store.Camera) error {
 	if c.Transport != "udp" {
 		c.Transport = "tcp"
 	}
-	if c.RecordMode != "off" {
-		c.RecordMode = "continuous"
+	// Recording is opt-in: a new camera only records when asked to.
+	if c.RecordMode != "continuous" {
+		c.RecordMode = "off"
 	}
+	if c.OnvifPort <= 0 || c.OnvifPort > 65535 {
+		c.OnvifPort = 80
+	}
+	c.OnvifUser = strings.TrimSpace(c.OnvifUser)
 	if c.RetentionDays < 0 {
 		c.RetentionDays = 0
 	}
@@ -266,6 +281,7 @@ func (s *Server) createCamera(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.Cams.Apply(c)
+	c.OnvifPass = ""
 	writeJSON(w, 201, c)
 }
 
@@ -280,9 +296,14 @@ func (s *Server) updateCamera(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 404, "camera not found")
 		return
 	}
+	oldPass := c.OnvifPass
+	c.OnvifPass = ""
 	if err := json.NewDecoder(io.LimitReader(r.Body, 65536)).Decode(&c); err != nil {
 		writeErr(w, 400, "bad request")
 		return
+	}
+	if c.OnvifPass == "" && c.OnvifUser != "" {
+		c.OnvifPass = oldPass // not sent back to clients, so an empty field means "unchanged"
 	}
 	c.ID = id
 	if err := normalize(&c); err != nil {
@@ -293,7 +314,9 @@ func (s *Server) updateCamera(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
+	s.ptz.invalidate(id)
 	go s.Cams.Apply(c)
+	c.OnvifPass = ""
 	writeJSON(w, 200, c)
 }
 
@@ -304,6 +327,7 @@ func (s *Server) deleteCamera(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.Cams.Stop(id)
+	s.ptz.invalidate(id)
 	if err := s.Store.DeleteCamera(id); err != nil {
 		writeErr(w, 500, err.Error())
 		return
