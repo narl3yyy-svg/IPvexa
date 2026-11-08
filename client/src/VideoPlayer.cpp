@@ -208,6 +208,7 @@ SessionResult runSession(VideoPlayer *p, Interrupt *intr, const QString &url, bo
     av_dict_set(&opts, "rw_timeout", "8000000", 0);
     if (live) {
         av_dict_set(&opts, "fflags", "nobuffer", 0);
+        av_dict_set(&opts, "max_delay", "0", 0);
         av_dict_set(&opts, "probesize", "1000000", 0);
         av_dict_set(&opts, "analyzeduration", "1000000", 0);
     } else {

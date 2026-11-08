@@ -25,11 +25,11 @@ type ptzPreset struct {
 
 // ptzInfo describes what a camera's PTZ can do, so the app shows only working controls.
 type ptzInfo struct {
-	Protocol         string `json:"protocol"` // "onvif" | "ptzd"
-	Zoom             bool   `json:"zoom"`
-	PresetsSupported bool   `json:"presets_supported"`
-	Presets          int    `json:"presets"`
-	PresetsError     string `json:"presets_error,omitempty"`
+	Protocol         string   `json:"protocol"` // "onvif" | "ptzd"
+	Zoom             bool     `json:"zoom"`
+	PresetsSupported bool     `json:"presets_supported"`
+	Presets          int      `json:"presets"`
+	PresetsError     string   `json:"presets_error,omitempty"`
 	Actions          []string `json:"actions"` // extra buttons, e.g. "center", "home"
 }
 
@@ -48,8 +48,10 @@ type ptzDriver interface {
 
 type onvifDriver struct{ c *onvif.Client }
 
-func (d onvifDriver) Move(ctx context.Context, p, t, z float64) error { return d.c.ContinuousMove(ctx, p, t, z) }
-func (d onvifDriver) Stop(ctx context.Context) error                  { return d.c.Stop(ctx) }
+func (d onvifDriver) Move(ctx context.Context, p, t, z float64) error {
+	return d.c.ContinuousMove(ctx, p, t, z)
+}
+func (d onvifDriver) Stop(ctx context.Context) error { return d.c.Stop(ctx) }
 func (d onvifDriver) GotoPreset(ctx context.Context, tok string) error {
 	return d.c.GotoPreset(ctx, tok)
 }

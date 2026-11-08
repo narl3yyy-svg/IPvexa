@@ -92,9 +92,10 @@ func (s *Stream) Args() []string {
 		if tr == "" {
 			tr = "tcp"
 		}
-		a = append(a, "-rtsp_transport", tr, "-timeout", "10000000", "-fflags", "+genpts+discardcorrupt", "-i", s.URL)
+		// nobuffer/low_delay: hand packets on as soon as they arrive (lower live latency).
+		a = append(a, "-rtsp_transport", tr, "-timeout", "10000000", "-fflags", "+genpts+discardcorrupt+nobuffer", "-flags", "low_delay", "-i", s.URL)
 	default:
-		a = append(a, "-fflags", "+genpts+discardcorrupt", "-rw_timeout", "10000000", "-i", s.URL)
+		a = append(a, "-fflags", "+genpts+discardcorrupt+nobuffer", "-flags", "low_delay", "-rw_timeout", "10000000", "-i", s.URL)
 	}
 
 	vcodec := []string{"-c:v", "copy"}
