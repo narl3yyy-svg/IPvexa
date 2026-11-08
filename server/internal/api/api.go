@@ -63,6 +63,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/cameras/{id}/ptz/presets", auth("viewer", s.ptzPresets))
 	mux.Handle("POST /api/cameras/{id}/ptz/goto", auth("operator", s.ptzGoto))
 	mux.Handle("POST /api/cameras/{id}/ptz/presets", auth("operator", s.ptzSavePreset))
+	mux.Handle("POST /api/cameras/{id}/ptz/action", auth("operator", s.ptzAction))
 	return logRequests(mux)
 }
 
@@ -260,6 +261,9 @@ func normalize(c *store.Camera) error {
 		c.OnvifPort = 80
 	}
 	c.OnvifUser = strings.TrimSpace(c.OnvifUser)
+	if c.PTZProtocol != "onvif" && c.PTZProtocol != "ptzd" {
+		c.PTZProtocol = "auto"
+	}
 	if c.RetentionDays < 0 {
 		c.RetentionDays = 0
 	}

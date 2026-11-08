@@ -32,6 +32,8 @@ type Camera struct {
 	OnvifPort int    `json:"onvif_port"`
 	OnvifUser string `json:"onvif_user"`
 	OnvifPass string `json:"onvif_pass,omitempty"`
+	// PTZProtocol: "auto" (detect), "onvif", or "ptzd" (OpenIPC's ptzd web API).
+	PTZProtocol string `json:"ptz_protocol"`
 }
 
 type Segment struct {
@@ -96,6 +98,7 @@ var migrations = []string{
 	ALTER TABLE cameras ADD COLUMN onvif_port INTEGER NOT NULL DEFAULT 80;
 	ALTER TABLE cameras ADD COLUMN onvif_user TEXT NOT NULL DEFAULT '';
 	ALTER TABLE cameras ADD COLUMN onvif_pass TEXT NOT NULL DEFAULT '';`,
+	`ALTER TABLE cameras ADD COLUMN ptz_protocol TEXT NOT NULL DEFAULT 'auto';`,
 }
 
 func Open(path string) (*Store, error) {
@@ -141,11 +144,11 @@ func (s *Store) migrate() error {
 
 // ---- cameras ----
 
-const camCols = `id, name, brand, main_url, sub_url, transport, record_mode, record_sub, retention_days, enabled, created_at, ptz, onvif_port, onvif_user, onvif_pass`
+const camCols = `id, name, brand, main_url, sub_url, transport, record_mode, record_sub, retention_days, enabled, created_at, ptz, onvif_port, onvif_user, onvif_pass, ptz_protocol`
 
 func scanCamera(r interface{ Scan(...any) error }) (Camera, error) {
 	var c Camera
-	err := r.Scan(&c.ID, &c.Name, &c.Brand, &c.MainURL, &c.SubURL, &c.Transport, &c.RecordMode, &c.RecordSub, &c.RetentionDays, &c.Enabled, &c.CreatedAt, &c.PTZ, &c.OnvifPort, &c.OnvifUser, &c.OnvifPass)
+	err := r.Scan(&c.ID, &c.Name, &c.Brand, &c.MainURL, &c.SubURL, &c.Transport, &c.RecordMode, &c.RecordSub, &c.RetentionDays, &c.Enabled, &c.CreatedAt, &c.PTZ, &c.OnvifPort, &c.OnvifUser, &c.OnvifPass, &c.PTZProtocol)
 	return c, err
 }
 
@@ -176,9 +179,9 @@ func (s *Store) Camera(id int64) (Camera, error) {
 
 func (s *Store) CreateCamera(c *Camera) error {
 	c.CreatedAt = time.Now().UnixMilli()
-	res, err := s.db.Exec(`INSERT INTO cameras (name, brand, main_url, sub_url, transport, record_mode, record_sub, retention_days, enabled, created_at, ptz, onvif_port, onvif_user, onvif_pass)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, c.Name, c.Brand, c.MainURL, c.SubURL, c.Transport, c.RecordMode, c.RecordSub, c.RetentionDays, c.Enabled, c.CreatedAt,
-		c.PTZ, c.OnvifPort, c.OnvifUser, c.OnvifPass)
+	res, err := s.db.Exec(`INSERT INTO cameras (name, brand, main_url, sub_url, transport, record_mode, record_sub, retention_days, enabled, created_at, ptz, onvif_port, onvif_user, onvif_pass, ptz_protocol)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, c.Name, c.Brand, c.MainURL, c.SubURL, c.Transport, c.RecordMode, c.RecordSub, c.RetentionDays, c.Enabled, c.CreatedAt,
+		c.PTZ, c.OnvifPort, c.OnvifUser, c.OnvifPass, c.PTZProtocol)
 	if err != nil {
 		return err
 	}
@@ -188,9 +191,9 @@ func (s *Store) CreateCamera(c *Camera) error {
 
 func (s *Store) UpdateCamera(c *Camera) error {
 	res, err := s.db.Exec(`UPDATE cameras SET name=?, brand=?, main_url=?, sub_url=?, transport=?, record_mode=?, record_sub=?, retention_days=?, enabled=?,
-		ptz=?, onvif_port=?, onvif_user=?, onvif_pass=? WHERE id=?`,
+		ptz=?, onvif_port=?, onvif_user=?, onvif_pass=?, ptz_protocol=? WHERE id=?`,
 		c.Name, c.Brand, c.MainURL, c.SubURL, c.Transport, c.RecordMode, c.RecordSub, c.RetentionDays, c.Enabled,
-		c.PTZ, c.OnvifPort, c.OnvifUser, c.OnvifPass, c.ID)
+		c.PTZ, c.OnvifPort, c.OnvifUser, c.OnvifPass, c.PTZProtocol, c.ID)
 	if err != nil {
 		return err
 	}

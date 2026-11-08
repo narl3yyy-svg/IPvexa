@@ -10,7 +10,23 @@ Item {
     property real speed: 0.5
     property string error: ""
     property var presets: []
-    width: 132
+    // What this camera supports, from /ptz/check.
+    property bool hasZoom: true
+    property bool hasPresets: true
+    property var actions: []
+
+    function loadInfo() {
+        Api.call("GET", "/api/cameras/" + cameraId + "/ptz/check", null, function (err, data) {
+            if (err || !data) return
+            if (!data.ok) { root.error = data.error; return }
+            root.error = ""
+            root.hasZoom = !!data.zoom
+            root.hasPresets = !!data.presets_supported
+            root.actions = data.actions || []
+        })
+    }
+    onCameraIdChanged: if (visible && cameraId > 0) loadInfo()
+    width: 190
     height: 132 + 34
 
     property real _pan: 0
@@ -42,11 +58,12 @@ Item {
     }
     Timer { id: repeat; interval: 700; repeat: true; onTriggered: root.send() }
     Component.onDestruction: stop()
-    onVisibleChanged: if (!visible) stop()
+    onVisibleChanged: if (!visible) stop(); else if (cameraId > 0) loadInfo()
 
     // ---- D-pad ----
     Rectangle {
         id: pad
+        anchors.right: parent.right
         width: 132; height: 132; radius: 66
         color: "#a0101318"
         border.color: "#40ffffff"
@@ -90,10 +107,10 @@ Item {
     Row {
         anchors.top: pad.bottom
         anchors.topMargin: 4
-        anchors.horizontalCenter: pad.horizontalCenter
+        anchors.right: pad.right
         spacing: 4
         Repeater {
-            model: [{ t: "−", z: -1, tip: "Zoom out" }, { t: "+", z: 1, tip: "Zoom in" }]
+            model: root.hasZoom ? [{ t: "−", z: -1, tip: "Zoom out" }, { t: "+", z: 1, tip: "Zoom in" }] : []
             Rectangle {
                 width: 30; height: 28; radius: 6
                 color: zma.pressed ? Theme.accent : "#a0101318"
@@ -109,7 +126,27 @@ Item {
                 }
             }
         }
+        Repeater {
+            model: root.actions
+            Rectangle {
+                width: 50; height: 28; radius: 6
+                color: ama.pressed ? Theme.accent : ama.containsMouse ? "#40ffffff" : "#a0101318"
+                border.color: "#40ffffff"
+                Text { anchors.centerIn: parent; text: modelData === "home" ? "Calibrate" : "Center"; color: "white"; font.pixelSize: 10 }
+                MouseArea {
+                    id: ama
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    ToolTip.visible: containsMouse
+                    ToolTip.text: modelData === "home" ? "Re-home the motors (recalibrate position)" : "Point the camera at the middle of its range"
+                    ToolTip.delay: 500
+                    onClicked: Api.call("POST", "/api/cameras/" + root.cameraId + "/ptz/action", { action: modelData },
+                                        function (err) { if (err) root.error = err })
+                }
+            }
+        }
         Rectangle {
+            visible: root.hasPresets
             width: 60; height: 28; radius: 6
             color: pma.containsMouse ? "#40ffffff" : "#a0101318"
             border.color: "#40ffffff"

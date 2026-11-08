@@ -22,7 +22,7 @@ AppDialog {
     readonly property var brands: [
         { key: "dahua",     name: "Dahua / Amcrest / Lorex", main: "/cam/realmonitor?channel={ch}&subtype=0", sub: "/cam/realmonitor?channel={ch}&subtype=1", port: 554 },
         { key: "openipc",   name: "OpenIPC firmware",        main: "/stream=0", sub: "/stream=1", port: 554, user: "root",
-          hint: "OpenIPC uses the camera's web login for video. PTZ needs the camera's ONVIF service to support movement; use Test PTZ to check." },
+          hint: "OpenIPC uses the camera's web login for video and PTZ (ptzd). Use Test PTZ after saving to check." },
         { key: "thingino",  name: "Thingino firmware (Wyze etc.)", main: "/ch0", sub: "/ch1", port: 554, user: "thingino",
           hint: "Thingino's video stream has its own login, separate from the root web login (factory default thingino / thingino). Check it in the camera's web page under the streamer / RTSP settings." },
         { key: "hikvision", name: "Hikvision / Annke",       main: "/Streaming/Channels/{ch}01", sub: "/Streaming/Channels/{ch}02", port: 554 },
@@ -81,6 +81,7 @@ AppDialog {
         onvifPort.value = cam && cam.onvif_port ? cam.onvif_port : 80
         onvifUser.text = cam && cam.onvif_user ? cam.onvif_user : ""
         onvifPass.text = ""
+        ptzProto.currentIndex = cam && cam.ptz_protocol === "onvif" ? 1 : cam && cam.ptz_protocol === "ptzd" ? 2 : 0
         ptzResult = ""
         retention.value = cam ? cam.retention_days : 30
         tcp.currentIndex = cam && cam.transport === "udp" ? 1 : 0
@@ -106,7 +107,8 @@ AppDialog {
             enabled: enabled_.checked,
             ptz: ptz.checked,
             onvif_port: onvifPort.value,
-            onvif_user: onvifUser.text.trim()
+            onvif_user: onvifUser.text.trim(),
+            ptz_protocol: ["auto", "onvif", "ptzd"][ptzProto.currentIndex]
         }
         if (onvifPass.text.length > 0) cam.onvif_pass = onvifPass.text
         if (camId > 0) cam.id = camId
@@ -233,7 +235,16 @@ AppDialog {
             spacing: 10
             Switch { id: ptz; text: "PTZ camera (pan / tilt / zoom)" }
             Item { Layout.fillWidth: true }
-            Label { visible: ptz.checked; text: "ONVIF port" }
+            Label { visible: ptz.checked; text: "Protocol" }
+            ComboBox {
+                id: ptzProto
+                visible: ptz.checked
+                implicitWidth: 170
+                model: ["Auto-detect", "ONVIF", "OpenIPC ptzd"]
+                ToolTip.visible: hovered
+                ToolTip.text: "Auto-detect uses OpenIPC's ptzd when the camera has it, otherwise ONVIF."
+            }
+            Label { visible: ptz.checked; text: "Control port" }
             SpinBox { visible: ptz.checked; id: onvifPort; from: 1; to: 65535; value: 80; editable: true }
         }
         GridLayout {
@@ -242,9 +253,9 @@ AppDialog {
             columnSpacing: 10
             rowSpacing: 8
             Layout.fillWidth: true
-            Label { text: "ONVIF user" }
+            Label { text: "Control user" }
             TextField { id: onvifUser; Layout.fillWidth: true; placeholderText: "same as stream login" }
-            Label { text: "ONVIF password" }
+            Label { text: "Control password" }
             TextField {
                 id: onvifPass
                 Layout.fillWidth: true
@@ -263,7 +274,9 @@ AppDialog {
                     Api.call("GET", "/api/cameras/" + root.camId + "/ptz/check", null, function (err, data) {
                         root.ptzTesting = false
                         if (err) root.ptzResult = "✗ " + err
-                        else if (data.ok) root.ptzResult = "✓ PTZ works" + (data.presets_supported ? " (" + data.presets + " presets)" : " (this camera has no presets)")
+                        else if (data.ok) root.ptzResult = "✓ PTZ works via " + (data.protocol === "ptzd" ? "OpenIPC ptzd" : "ONVIF")
+                                                           + (data.zoom ? "" : " · pan/tilt only")
+                                                           + (data.presets_supported ? " · " + data.presets + " presets" : " · no presets")
                         else root.ptzResult = "✗ " + data.error
                     })
                 }
