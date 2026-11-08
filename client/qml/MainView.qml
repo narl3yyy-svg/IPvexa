@@ -1,138 +1,171 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Window
 import QtCore
 import Ipvexa
+import "LayoutEngine.js" as LE
 
 Item {
     id: root
     property var window
 
-    // ---- Layout state ----
-    // A layout = grid preset + tile aspect + the camera in each slot (0 = empty).
-    property string preset: "2x2"
-    property string aspect: "16:9"
-    property var slotCams: []
-    property int selectedSlot: 0
-    property int maximizedSlot: -1
-    property string layoutName: "Default"
+    // ---- Layout state (all layouts are saved automatically) ----
+    property var layouts: []          // every layout
+    property var tabs: []             // names of layouts open as tabs
+    property string active: ""        // name of the active tab
+    property int selectedIndex: -1
+    property int maximizedIndex: -1
     property bool treeVisible: true
+    property bool rightVisible: true
+    property bool fullscreenMode: false
+    property int prevVisibility: Window.Windowed
 
-    readonly property var presets: ["1", "2x2", "3x3", "4x4", "5x5", "1+5", "1+7", "1+12"]
-    readonly property var slots: computeSlots(preset)
-    readonly property int selectedCamera: slotCams[selectedSlot] || firstCamera()
+    readonly property var cur: findLayout(active) || LE.make(active, 2, 2)
+    readonly property int selectedCamera: {
+        var it = cur.items[selectedIndex]
+        return it ? it.cam : (cur.items.length > 0 ? cur.items[0].cam : 0)
+    }
 
     Settings {
         id: store
         category: "layouts"
+        property string all: ""
+        property string tabs: ""
+        property string active: ""
+        property bool treeVisible: true
+        property bool rightVisible: true
+        // Ipvexa 0.1 keys, migrated once
         property string saved: "[]"
         property string current: ""
-        property bool treeVisible: true
     }
 
-    function computeSlots(p) {
-        // Returns [{x, y, w, h}] in grid cells, plus cols/rows on the array.
-        var out = []
-        var cols, rows, big = 0
-        switch (p) {
-        case "1": cols = rows = 1; break
-        case "2x2": cols = rows = 2; break
-        case "3x3": cols = rows = 3; break
-        case "4x4": cols = rows = 4; break
-        case "5x5": cols = rows = 5; break
-        case "1+5": cols = rows = 3; big = 2; break
-        case "1+7": cols = rows = 4; big = 3; break
-        case "1+12": cols = rows = 4; big = 2; break
-        default: cols = rows = 2
-        }
-        if (big > 0)
-            out.push({ x: 0, y: 0, w: big, h: big })
-        for (var y = 0; y < rows; y++)
-            for (var x = 0; x < cols; x++)
-                if (!(x < big && y < big))
-                    out.push({ x: x, y: y, w: 1, h: 1 })
-        out.cols = cols
-        out.rows = rows
-        return out
+    function findLayout(name) {
+        for (var i = 0; i < layouts.length; i++) if (layouts[i].name === name) return layouts[i]
+        return null
     }
-
-    function firstCamera() {
-        return Api.cameras.length > 0 ? Api.cameras[0].id : 0
+    function persist() {
+        store.all = JSON.stringify(layouts)
+        store.tabs = JSON.stringify(tabs)
+        store.active = active
     }
-
-    function setSlotCam(slot, camId) {
-        var a = slotCams.slice()
-        while (a.length <= slot) a.push(0)
-        // Dragging a camera that is already shown moves it instead of duplicating it.
-        var existing = a.indexOf(camId)
-        if (camId > 0 && existing >= 0 && existing !== slot)
-            a[existing] = a[slot] || 0
-        a[slot] = camId
-        slotCams = a
-        selectedSlot = slot
-        persistCurrent()
+    // Replace the active layout with fn(active layout).
+    function update(fn) {
+        var next = fn(cur)
+        if (!next) return
+        next.name = active
+        var list = layouts.slice(), found = false
+        for (var i = 0; i < list.length; i++) if (list[i].name === active) { list[i] = next; found = true }
+        if (!found) list.push(next)
+        layouts = list
+        if (selectedIndex >= next.items.length) selectedIndex = next.items.length - 1
+        if (maximizedIndex >= next.items.length) maximizedIndex = -1
+        persist()
     }
-
-    function placeCamera(camId) {
-        var a = slotCams
-        for (var i = 0; i < slots.length; i++)
-            if (!(a[i] > 0)) { setSlotCam(i, camId); return }
-        setSlotCam(selectedSlot, camId)
+    function uniqueName(base) {
+        var n = 1, name = base
+        while (findLayout(name)) name = base + " " + (++n)
+        return name
     }
-
-    function setPreset(p) {
-        preset = p
-        maximizedSlot = -1
-        if (selectedSlot >= computeSlots(p).length) selectedSlot = 0
-        persistCurrent()
+    function openLayout(name) {
+        if (!findLayout(name)) return
+        if (tabs.indexOf(name) < 0) tabs = tabs.concat([name])
+        active = name
+        selectedIndex = -1
+        maximizedIndex = -1
+        persist()
     }
-
-    function autoFill() {
-        var ids = Api.cameras.map(function (c) { return c.id })
-        var n = ids.length
-        preset = n <= 1 ? "1" : n <= 4 ? "2x2" : n <= 6 ? "1+5" : n <= 9 ? "3x3" : n <= 13 ? "1+12" : n <= 16 ? "4x4" : "5x5"
-        slotCams = ids.slice(0, computeSlots(preset).length)
+    function newLayout() {
+        var name = uniqueName("Layout")
+        layouts = layouts.concat([LE.make(name, 2, 2)])
+        openLayout(name)
     }
-
-    function savedLayouts() {
-        try { return JSON.parse(store.saved) } catch (e) { return [] }
+    function closeTab(name) {
+        if (tabs.length <= 1) return
+        var i = tabs.indexOf(name)
+        tabs = tabs.filter(function (t) { return t !== name })
+        if (active === name) active = tabs[Math.max(0, i - 1)]
+        maximizedIndex = -1
+        persist()
     }
-
-    function persistCurrent() {
-        store.current = JSON.stringify({ name: layoutName, preset: preset, aspect: aspect, cams: slotCams })
+    function renameLayout(oldName, newName) {
+        newName = newName.trim()
+        if (newName === "" || newName === oldName || findLayout(newName)) return
+        layouts = layouts.map(function (l) { if (l.name === oldName) { var c = LE.clone(l); c.name = newName; return c } return l })
+        tabs = tabs.map(function (t) { return t === oldName ? newName : t })
+        if (active === oldName) active = newName
+        persist()
     }
-
-    function saveLayout(name) {
-        var list = savedLayouts().filter(function (l) { return l.name !== name })
-        list.push({ name: name, preset: preset, aspect: aspect, cams: slotCams })
-        store.saved = JSON.stringify(list)
-        layoutName = name
-        persistCurrent()
-        tree.refreshLayouts()
+    function duplicateLayout(name) {
+        var l = findLayout(name)
+        if (!l) return
+        var c = LE.clone(l)
+        c.name = uniqueName(name + " copy")
+        layouts = layouts.concat([c])
+        openLayout(c.name)
     }
-
     function deleteLayout(name) {
-        store.saved = JSON.stringify(savedLayouts().filter(function (l) { return l.name !== name }))
-        tree.refreshLayouts()
+        if (layouts.length <= 1) return
+        layouts = layouts.filter(function (l) { return l.name !== name })
+        tabs = tabs.filter(function (t) { return t !== name })
+        if (tabs.length === 0) tabs = [layouts[0].name]
+        if (active === name || tabs.indexOf(active) < 0) active = tabs[0]
+        persist()
     }
 
-    function loadLayout(l) {
-        layoutName = l.name
-        preset = l.preset
-        aspect = l.aspect || "16:9"
-        slotCams = l.cams || []
-        selectedSlot = 0
-        maximizedSlot = -1
-        persistCurrent()
+    function enterFullscreen(index) {
+        if (!fullscreenMode) prevVisibility = window.visibility
+        fullscreenMode = true
+        maximizedIndex = index
+        selectedIndex = index
+        window.visibility = Window.FullScreen
+    }
+    function exitFullscreen() {
+        if (!fullscreenMode) { maximizedIndex = -1; return }
+        fullscreenMode = false
+        maximizedIndex = -1
+        window.visibility = prevVisibility === Window.FullScreen ? Window.Windowed : prevVisibility
     }
 
     Component.onCompleted: {
         treeVisible = store.treeVisible
-        try {
-            var c = JSON.parse(store.current)
-            if (c && c.preset) { loadLayout(c); return }
-        } catch (e) {}
-        filler.start()
+        rightVisible = store.rightVisible
+        var all = []
+        try { all = JSON.parse(store.all || "[]") } catch (e) { all = [] }
+        if (all.length === 0) {
+            // Migrate layouts from Ipvexa 0.1, if any.
+            try { JSON.parse(store.saved || "[]").forEach(function (l) { all.push(LE.migrate(l)) }) } catch (e) {}
+            try {
+                var c = JSON.parse(store.current || "")
+                if (c && c.preset) {
+                    var m = LE.migrate(c)
+                    all = all.filter(function (l) { return l.name !== m.name })
+                    all.unshift(m)
+                }
+            } catch (e) {}
+        }
+        all = all.map(function (l) { return LE.migrate(l) })
+        var t = []
+        try { t = JSON.parse(store.tabs || "[]") } catch (e) { t = [] }
+        if (all.length === 0) {
+            all = [LE.make("Layout 1", 2, 2)]
+            filler.start()
+        }
+        layouts = all
+        tabs = t.filter(function (n) { return all.some(function (l) { return l.name === n }) })
+        if (tabs.length === 0) tabs = [all[0].name]
+        active = tabs.indexOf(store.active) >= 0 ? store.active : tabs[0]
+        persist()
+    }
+    // First run: fill the first layout with the cameras once they've loaded.
+    Timer {
+        id: filler
+        interval: 300; repeat: true
+        onTriggered: if (Api.cameras.length > 0) {
+            stop()
+            if (root.cur.items.length === 0)
+                root.update(function (l) { return LE.autoLayout(l.name, Api.cameras.map(function (c) { return c.id })) })
+        }
     }
     // --camera-settings <id>: open that camera's settings on start (testing / support).
     Timer {
@@ -143,12 +176,6 @@ Item {
             if (cam) { cameraDialog.load(cam); cameraDialog.open() }
         }
     }
-    // First run: wait for the camera list, then fill a layout automatically.
-    Timer {
-        id: filler
-        interval: 300; repeat: true
-        onTriggered: if (Api.cameras.length > 0) { stop(); autoFill(); persistCurrent() }
-    }
 
     Item { id: dragLayer; anchors.fill: parent; z: 100 }
 
@@ -156,68 +183,107 @@ Item {
         anchors.fill: parent
         spacing: 0
 
-        // ---------- Top bar ----------
+        // ---------- Title bar: logo + layout tabs ----------
         Rectangle {
+            visible: !root.fullscreenMode
             Layout.fillWidth: true
-            Layout.preferredHeight: 44
-            color: Theme.panel
+            Layout.preferredHeight: 40
+            color: "#13181b"
             Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: Theme.border }
 
             RowLayout {
                 anchors.fill: parent
                 anchors.leftMargin: 10
                 anchors.rightMargin: 10
-                spacing: 6
+                spacing: 0
 
-                IconButton { glyph: "☰"; tip: "Show/hide resource tree"; active: root.treeVisible
-                    onClicked: { root.treeVisible = !root.treeVisible; store.treeVisible = root.treeVisible } }
                 Rectangle {
-                    width: 24; height: 24; radius: 6
+                    width: 22; height: 22; radius: 6
                     gradient: Gradient {
-                        GradientStop { position: 0; color: "#3b9bff" }
-                        GradientStop { position: 1; color: "#1f5fd1" }
+                        GradientStop { position: 0; color: "#46b8ec" }
+                        GradientStop { position: 1; color: "#1d74b8" }
                     }
-                    Text { anchors.centerIn: parent; text: "◉"; color: "white"; font.pixelSize: 14 }
+                    Rectangle { anchors.centerIn: parent; width: 10; height: 10; radius: 5; color: "transparent"; border.color: "white"; border.width: 2 }
                 }
-                Text { text: "Ipvexa"; color: Theme.text; font.pixelSize: 15; font.weight: Font.Bold }
-                Rectangle { width: 1; height: 22; color: Theme.border; Layout.leftMargin: 8; Layout.rightMargin: 8 }
-                ToolText { text: root.layoutName; color: Theme.text; font.weight: Font.DemiBold }
-                Item { width: 10 }
+                Text { text: "Ipvexa"; color: Theme.text; font.pixelSize: 14; font.weight: Font.Bold; Layout.leftMargin: 8; Layout.rightMargin: 16 }
 
+                // Tabs
                 Repeater {
-                    model: root.presets
-                    IconButton {
-                        text: modelData
-                        size: 26
-                        active: root.preset === modelData
-                        tip: "Layout " + modelData
-                        onClicked: root.setPreset(modelData)
+                    model: root.tabs
+                    Rectangle {
+                        id: tabItem
+                        required property string modelData
+                        readonly property bool isActive: modelData === root.active
+                        Layout.preferredHeight: 40
+                        Layout.preferredWidth: Math.min(200, tabRow.implicitWidth + 28)
+                        color: isActive ? Theme.scene : tabMa.containsMouse ? "#1b2226" : "transparent"
+                        Rectangle { visible: tabItem.isActive; anchors.top: parent.top; width: parent.width; height: 2; color: Theme.accent }
+                        Rectangle { anchors.right: parent.right; height: parent.height; width: 1; color: Theme.border }
+                        MouseArea {
+                            id: tabMa
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
+                            onClicked: (m) => {
+                                if (m.button === Qt.MiddleButton) root.closeTab(tabItem.modelData)
+                                else if (m.button === Qt.RightButton) tabMenu.popup()
+                                else root.openLayout(tabItem.modelData)
+                            }
+                            onDoubleClicked: { renameDialog.target = tabItem.modelData; renameDialog.open() }
+                        }
+                        Row {
+                            id: tabRow
+                            anchors.left: parent.left
+                            anchors.leftMargin: 12
+                            anchors.verticalCenter: parent.verticalCenter
+                            spacing: 8
+                            TileIcon { kind: "layout"; width: 12; height: 12; color: tabItem.isActive ? Theme.accent : Theme.textFaint; anchors.verticalCenter: parent.verticalCenter }
+                            Text {
+                                text: tabItem.modelData
+                                color: tabItem.isActive ? Theme.text : Theme.textDim
+                                font.pixelSize: 12
+                                elide: Text.ElideRight
+                                width: Math.min(implicitWidth, 130)
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+                            Rectangle {
+                                visible: root.tabs.length > 1 && (tabMa.containsMouse || tabItem.isActive || closeMa.containsMouse)
+                                width: 16; height: 16; radius: 3
+                                anchors.verticalCenter: parent.verticalCenter
+                                color: closeMa.containsMouse ? "#40ffffff" : "transparent"
+                                TileIcon { anchors.centerIn: parent; kind: "close"; width: 8; height: 8; color: Theme.textDim; lineWidth: 1.4 }
+                                MouseArea { id: closeMa; anchors.fill: parent; hoverEnabled: true; onClicked: root.closeTab(tabItem.modelData) }
+                            }
+                        }
+                        Menu {
+                            id: tabMenu
+                            MenuItem { text: "Rename…"; onTriggered: { renameDialog.target = tabItem.modelData; renameDialog.open() } }
+                            MenuItem { text: "Duplicate"; onTriggered: root.duplicateLayout(tabItem.modelData) }
+                            MenuItem { text: "Close tab"; enabled: root.tabs.length > 1; onTriggered: root.closeTab(tabItem.modelData) }
+                        }
                     }
                 }
-                Rectangle { width: 1; height: 22; color: Theme.border; Layout.leftMargin: 6; Layout.rightMargin: 6 }
-                Repeater {
-                    model: ["16:9", "4:3", "Fill"]
-                    IconButton {
-                        text: modelData
-                        size: 26
-                        active: root.aspect === modelData
-                        tip: "Tile aspect ratio"
-                        onClicked: { root.aspect = modelData; root.persistCurrent() }
+                Rectangle {
+                    Layout.preferredWidth: 34
+                    Layout.preferredHeight: 40
+                    color: newMa.containsMouse ? "#1b2226" : "transparent"
+                    TileIcon { anchors.centerIn: parent; kind: "plus"; width: 12; height: 12; color: Theme.textDim }
+                    MouseArea {
+                        id: newMa; anchors.fill: parent; hoverEnabled: true; onClicked: root.newLayout()
+                        ToolTip.visible: containsMouse; ToolTip.text: "New layout tab"; ToolTip.delay: 500
                     }
                 }
-                IconButton { glyph: "💾"; tip: "Save layout as…"; onClicked: saveDialog.open() }
 
                 Item { Layout.fillWidth: true }
 
                 ToolText {
                     property var d: Api.system.disk
                     visible: !!d && d.total > 0
-                    text: d ? "Storage " + (100 - d.free * 100 / d.total).toFixed(0) + "% used · "
-                              + (d.free / 1e9).toFixed(0) + " GB free" : ""
+                    text: d ? (100 - d.free * 100 / d.total).toFixed(0) + "% storage used" : ""
+                    Layout.rightMargin: 14
                 }
-                Rectangle { width: 1; height: 22; color: Theme.border; Layout.leftMargin: 6; Layout.rightMargin: 6 }
-                ToolText { text: Api.username + " · " + Api.role }
-                IconButton { glyph: "⏻"; tip: "Sign out"; onClicked: Api.logout() }
+                ToolText { text: Api.username; color: Theme.text; Layout.rightMargin: 4 }
+                IconButton { glyph: "⏻"; size: 28; tip: "Sign out"; onClicked: Api.logout() }
             }
         }
 
@@ -229,43 +295,120 @@ Item {
 
             ResourceTree {
                 id: tree
-                visible: root.treeVisible
-                Layout.preferredWidth: 270
+                visible: root.treeVisible && !root.fullscreenMode
+                Layout.preferredWidth: 260
                 Layout.fillHeight: true
                 dragLayer: dragLayer
-                layouts: root.savedLayouts()
-                currentLayout: root.layoutName
-                onCameraActivated: (id) => root.placeCamera(id)
-                onEditCamera: (id) => { cameraDialog.load(Api.camera(id)); cameraDialog.open() }
+                layouts: root.layouts
+                currentLayout: root.active
+                onCameraActivated: (id) => root.update(function (l) { return LE.addCamera(l, id) })
+                onEditCamera: (id) => { cameraDialog.load(Theme.findCamera(Api.cameras, id)); cameraDialog.open() }
                 onAddCamera: { cameraDialog.load(null); cameraDialog.open() }
-                onLayoutActivated: (l) => root.loadLayout(l)
+                onLayoutActivated: (name) => root.openLayout(name)
                 onDeleteLayout: (name) => root.deleteLayout(name)
-                onNewLayout: { root.layoutName = "New layout"; root.slotCams = []; root.persistCurrent() }
-                function refreshLayouts() { layouts = root.savedLayouts() }
+                onRenameLayout: (name) => { renameDialog.target = name; renameDialog.open() }
+                onDuplicateLayout: (name) => root.duplicateLayout(name)
+                onNewLayout: root.newLayout()
             }
-            Rectangle { visible: root.treeVisible; Layout.fillHeight: true; width: 1; color: Theme.border }
+            Rectangle { visible: tree.visible; Layout.fillHeight: true; width: 1; color: Theme.border }
 
-            SceneView {
-                id: scene
+            ColumnLayout {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                slots: root.slots
-                slotCams: root.slotCams
-                aspect: root.aspect
-                selectedSlot: root.selectedSlot
-                maximizedSlot: root.maximizedSlot
-                dragLayer: dragLayer
-                onSlotSelected: (i) => root.selectedSlot = i
-                onSlotMaximizeToggled: (i) => root.maximizedSlot = (root.maximizedSlot === i ? -1 : i)
-                onCameraDropped: (slot, camId) => root.setSlotCam(slot, camId)
-                onSlotCleared: (i) => root.setSlotCam(i, 0)
-                onCameraSettingsRequested: (id) => { cameraDialog.load(Theme.findCamera(Api.cameras, id)); cameraDialog.open() }
+                spacing: 0
+
+                // Scene toolbar
+                Rectangle {
+                    visible: !root.fullscreenMode
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 34
+                    color: "#161c1f"
+                    Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: Theme.border }
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.leftMargin: 6
+                        anchors.rightMargin: 6
+                        spacing: 2
+                        IconButton { glyph: "☰"; size: 26; tip: "Show/hide resource tree"; active: root.treeVisible
+                            onClicked: { root.treeVisible = !root.treeVisible; store.treeVisible = root.treeVisible } }
+                        Rectangle { width: 1; height: 18; color: Theme.border; Layout.leftMargin: 4; Layout.rightMargin: 4 }
+                        ToolText { text: "Arrange"; color: Theme.textFaint; Layout.rightMargin: 4 }
+                        Repeater {
+                            model: LE.PRESETS
+                            IconButton { text: modelData; size: 24; tip: "Arrange cameras as " + modelData
+                                onClicked: { root.maximizedIndex = -1; root.update(function (l) { return LE.applyPreset(l, modelData) }) } }
+                        }
+                        Rectangle { width: 1; height: 18; color: Theme.border; Layout.leftMargin: 4; Layout.rightMargin: 4 }
+                        ToolText { text: "Grid " + root.cur.cols + "×" + root.cur.rows; color: Theme.textDim; Layout.rightMargin: 4 }
+                        IconButton { text: "−col"; size: 24; tip: "Remove a column"; onClicked: root.update(function (l) { return LE.setGrid(l, l.cols - 1, l.rows) }) }
+                        IconButton { text: "+col"; size: 24; tip: "Add a column"; onClicked: root.update(function (l) { return LE.setGrid(l, l.cols + 1, l.rows) }) }
+                        IconButton { text: "−row"; size: 24; tip: "Remove a row"; onClicked: root.update(function (l) { return LE.setGrid(l, l.cols, l.rows - 1) }) }
+                        IconButton { text: "+row"; size: 24; tip: "Add a row"; onClicked: root.update(function (l) { return LE.setGrid(l, l.cols, l.rows + 1) }) }
+                        Rectangle { width: 1; height: 18; color: Theme.border; Layout.leftMargin: 4; Layout.rightMargin: 4 }
+                        Repeater {
+                            model: ["16:9", "4:3", "Fill"]
+                            IconButton { text: modelData; size: 24; active: root.cur.aspect === modelData; tip: "Tile shape"
+                                onClicked: root.update(function (l) { var c = LE.clone(l); c.aspect = modelData; return c }) }
+                        }
+                        Item { Layout.fillWidth: true }
+                        IconButton {
+                            size: 26; tip: "Full screen (F11)"
+                            onClicked: window.visibility = window.visibility === Window.FullScreen ? Window.Windowed : Window.FullScreen
+                            TileIcon { anchors.centerIn: parent; kind: "fullscreen"; width: 13; height: 13; color: Theme.text }
+                        }
+                        IconButton {
+                            size: 26; tip: "Show/hide notifications & health"; active: root.rightVisible
+                            onClicked: { root.rightVisible = !root.rightVisible; store.rightVisible = root.rightVisible }
+                            TileIcon { anchors.centerIn: parent; kind: "panel"; width: 13; height: 13; color: parent.active ? Theme.accent : Theme.text }
+                        }
+                    }
+                }
+
+                SceneView {
+                    id: scene
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    layout: root.cur
+                    selectedIndex: root.selectedIndex
+                    maximizedIndex: root.maximizedIndex
+                    dragLayer: dragLayer
+                    onItemSelected: (i) => root.selectedIndex = i
+                    onMaximizeToggled: (i) => {
+                        if (root.fullscreenMode) { root.exitFullscreen(); return }
+                        root.maximizedIndex = (root.maximizedIndex === i ? -1 : i)
+                    }
+                    onFullscreenRequested: (i) => {
+                        if (root.fullscreenMode && root.maximizedIndex === i) root.exitFullscreen()
+                        else root.enterFullscreen(i)
+                    }
+                    onRemoveRequested: (i) => {
+                        if (root.maximizedIndex === i) root.exitFullscreen()
+                        root.update(function (l) { return LE.removeItem(l, i) })
+                    }
+                    onCameraSettingsRequested: (id) => { cameraDialog.load(Theme.findCamera(Api.cameras, id)); cameraDialog.open() }
+                    onCameraDropped: (cam, x, y) => root.update(function (l) { return LE.addCamera(l, cam, x, y) })
+                    onItemMoved: (i, x, y) => root.update(function (l) { return LE.moveItem(l, i, x, y) })
+                    onItemResized: (i, w, h) => root.update(function (l) { return LE.resizeItem(l, i, w, h) })
+                    onBackgroundMenuRequested: sceneMenu.popup()
+                }
+            }
+
+            Rectangle { visible: right.visible; Layout.fillHeight: true; width: 1; color: Theme.border }
+            RightPanel {
+                id: right
+                visible: root.rightVisible && !root.fullscreenMode
+                Layout.preferredWidth: 290
+                Layout.fillHeight: true
+                onCameraFocusRequested: (cam, t) => {
+                    root.update(function (l) { return LE.addCamera(l, cam) })
+                    for (var i = 0; i < root.cur.items.length; i++) if (root.cur.items[i].cam === cam) root.selectedIndex = i
+                    Clock.seek(t - 10000)
+                }
             }
         }
 
         Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
 
-        // ---------- Timeline ----------
         Timeline {
             Layout.fillWidth: true
             Layout.preferredHeight: 92
@@ -274,22 +417,48 @@ Item {
         }
     }
 
+    Menu {
+        id: sceneMenu
+        Menu {
+            title: "Arrange as"
+            Repeater {
+                model: LE.PRESETS
+                MenuItem { text: modelData; onTriggered: root.update(function (l) { return LE.applyPreset(l, modelData) }) }
+            }
+        }
+        MenuItem { text: "Add column"; onTriggered: root.update(function (l) { return LE.setGrid(l, l.cols + 1, l.rows) }) }
+        MenuItem { text: "Add row"; onTriggered: root.update(function (l) { return LE.setGrid(l, l.cols, l.rows + 1) }) }
+        MenuItem { text: "Shrink grid to fit cameras"
+            onTriggered: root.update(function (l) { var m = LE.minGrid(l); return LE.setGrid(l, m.cols, m.rows) }) }
+        MenuSeparator {}
+        MenuItem { text: "Clear layout"; onTriggered: root.update(function (l) { var c = LE.clone(l); c.items = []; return c }) }
+        MenuItem { text: "New layout tab"; onTriggered: root.newLayout() }
+    }
+
     Shortcut { sequence: "Space"; onActivated: Clock.togglePlay() }
-    Shortcut { sequence: "Escape"; onActivated: root.maximizedSlot = -1 }
+    Shortcut { sequence: "Escape"; onActivated: root.exitFullscreen() }
     Shortcut { sequence: "Left"; onActivated: Clock.step(-10000) }
     Shortcut { sequence: "Right"; onActivated: Clock.step(10000) }
     Shortcut { sequence: "L"; onActivated: Clock.goLive() }
-    Shortcut { sequences: [StandardKey.Delete]; onActivated: root.setSlotCam(root.selectedSlot, 0) }
+    Shortcut {
+        sequences: [StandardKey.Delete]
+        onActivated: if (root.selectedIndex >= 0) {
+            var i = root.selectedIndex
+            root.selectedIndex = -1
+            root.update(function (l) { return LE.removeItem(l, i) })
+        }
+    }
+    Shortcut { sequences: [StandardKey.AddTab]; onActivated: root.newLayout() }
 
-    CameraDialog { id: cameraDialog; anchors.centerIn: parent }
+    CameraDialog { id: cameraDialog }
 
     AppDialog {
-        id: saveDialog
-        title: "Save layout"
-        modal: true
+        id: renameDialog
+        property string target: ""
+        title: "Rename layout"
         standardButtons: Dialog.Save | Dialog.Cancel
-        onOpened: { nameField.text = root.layoutName; nameField.selectAll(); nameField.forceActiveFocus() }
-        onAccepted: if (nameField.text.trim().length > 0) root.saveLayout(nameField.text.trim())
-        TextField { id: nameField; width: 280; onAccepted: saveDialog.accept() }
+        onOpened: { renameField.text = target; renameField.selectAll(); renameField.forceActiveFocus() }
+        onAccepted: root.renameLayout(target, renameField.text)
+        TextField { id: renameField; width: 280; onAccepted: renameDialog.accept() }
     }
 }

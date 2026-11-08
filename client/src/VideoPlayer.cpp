@@ -463,8 +463,8 @@ void VideoPlayer::setCameraId(int id)
         return;
     m_cameraId = id;
     emit cameraIdChanged();
-    if (m_sink)
-        m_sink->setVideoFrame(QVideoFrame()); // don't show the previous camera's picture
+    stopThread();
+    clearPicture(); // don't show the previous camera's picture
     restart();
 }
 
@@ -503,6 +503,15 @@ void VideoPlayer::stopThread()
     if (m_thread.joinable())
         m_thread.join();
     m_stop = false;
+    // Drop any frame the old thread queued before it stopped, so it can't repaint later.
+    QMutexLocker l(&m_frameMu);
+    m_pending = QVideoFrame();
+}
+
+void VideoPlayer::clearPicture()
+{
+    if (m_sink)
+        m_sink->setVideoFrame(QVideoFrame());
 }
 
 void VideoPlayer::restart()
@@ -510,6 +519,7 @@ void VideoPlayer::restart()
     stopThread();
     auto *api = ApiClient::instance();
     if (m_cameraId <= 0 || !m_active || !api->loggedIn()) {
+        clearPicture();
         postState("idle");
         return;
     }

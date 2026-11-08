@@ -174,7 +174,7 @@ void ApiClient::refreshCameras()
             emit camerasChanged();
         }
     });
-    if (m_pollCount++ % 15 == 0) {
+    if (m_pollCount++ % 5 == 0) {
         auto *sys = m_net.get(request("/api/system"));
         handleReply(sys, QJSValue(), [this](const QVariant &data) {
             m_system = data.toMap();

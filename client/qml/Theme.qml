@@ -3,22 +3,23 @@ import QtQuick
 
 QtObject {
     // Surfaces (darkest to lightest)
-    readonly property color bg: "#0d0f13"
-    readonly property color scene: "#08090c"
-    readonly property color panel: "#14171c"
-    readonly property color panelAlt: "#1a1e25"
-    readonly property color raised: "#222833"
-    readonly property color border: "#262c36"
-    readonly property color borderStrong: "#363e4b"
+    // Slate tones in the spirit of Nx Witness.
+    readonly property color bg: "#101417"
+    readonly property color scene: "#0a0d0f"
+    readonly property color panel: "#192024"
+    readonly property color panelAlt: "#212a2f"
+    readonly property color raised: "#2a343a"
+    readonly property color border: "#263036"
+    readonly property color borderStrong: "#36434a"
 
     // Text
-    readonly property color text: "#e6e8ec"
-    readonly property color textDim: "#9aa3b2"
-    readonly property color textFaint: "#5f6876"
+    readonly property color text: "#e3e8eb"
+    readonly property color textDim: "#98a6ae"
+    readonly property color textFaint: "#5e6c74"
 
     // Accents
-    readonly property color accent: "#2f8cff"
-    readonly property color accentSoft: "#1d3d66"
+    readonly property color accent: "#2fa8e0"
+    readonly property color accentSoft: "#153a4d"
     readonly property color online: "#2fbf71"
     readonly property color recorded: "#2a9d63"
     readonly property color recordedHi: "#38c27d"

@@ -39,6 +39,10 @@ qt_add_qml_module(ipvexa
         qml/ToolText.qml
         qml/PtzControls.qml
         qml/AppDialog.qml
+        qml/TileIcon.qml
+        qml/TileButton.qml
+        qml/RightPanel.qml
+        qml/LayoutEngine.js
 )
 
 target_link_libraries(ipvexa PRIVATE
@@ -47,3 +51,9 @@ target_link_libraries(ipvexa PRIVATE
 )
 
 install(TARGETS ipvexa RUNTIME DESTINATION bin)
+
+# Unit tests for the layout engine: cmake --build build --target layout_tests && build/layout_tests
+find_package(Qt6 REQUIRED COMPONENTS Qml)
+add_executable(layout_tests EXCLUDE_FROM_ALL tests/layout_tests.cpp)
+target_compile_definitions(layout_tests PRIVATE IPVEXA_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(layout_tests PRIVATE Qt6::Core Qt6::Qml)

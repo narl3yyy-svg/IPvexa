@@ -63,6 +63,7 @@ signals:
 private:
     void restart();
     void stopThread();
+    void clearPicture();
     void deliverFrame();
 
     QPointer<QVideoSink> m_sink;
