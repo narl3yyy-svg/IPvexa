@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Ipvexa
+GenericName=Video Management System
+Comment=View live and recorded IP cameras
+Exec=ipvexa
+Icon=ipvexa
+Terminal=false
+Categories=AudioVideo;Video;Security;
+Keywords=camera;cctv;nvr;vms;surveillance;
+StartupWMClass=ipvexa

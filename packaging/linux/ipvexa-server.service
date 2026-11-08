@@ -1,0 +1,30 @@
+[Unit]
+Description=Ipvexa video management server (recording + streaming)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ipvexa
+Group=ipvexa
+SupplementaryGroups=video render
+ExecStart=/usr/local/bin/ipvexa-server -data /var/lib/ipvexa -listen :7480
+Restart=always
+RestartSec=3
+# Recording must keep up even when the machine is busy.
+Nice=-5
+IOSchedulingClass=best-effort
+IOSchedulingPriority=0
+
+# Hardening: the server only needs its data directory and the GPU for decoding.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/lib/ipvexa
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+
+[Install]
+WantedBy=multi-user.target
