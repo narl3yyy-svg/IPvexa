@@ -13,6 +13,34 @@ ApplicationWindow {
     title: Api.loggedIn ? "Ipvexa — " + Api.serverUrl.replace(/^https?:\/\//, "") : "Ipvexa"
     color: Theme.bg
 
+    // Dark palette for every control, popup and dialog. Set here (not only in C++)
+    // because desktop themes such as Plasma override the application palette.
+    palette {
+        window: Theme.panel
+        windowText: Theme.text
+        base: "#0f1217"
+        alternateBase: Theme.panelAlt
+        text: Theme.text
+        button: "#232933"
+        buttonText: Theme.text
+        brightText: "#ffffff"
+        highlight: Theme.accent
+        highlightedText: "#ffffff"
+        placeholderText: Theme.textFaint
+        toolTipBase: Theme.raised
+        toolTipText: Theme.text
+        light: "#3a4250"
+        midlight: "#2c333e"
+        mid: "#1d222a"
+        dark: "#0a0c0f"
+        shadow: "#000000"
+        link: Theme.accent
+        disabled.text: Theme.textFaint
+        disabled.buttonText: Theme.textFaint
+        disabled.windowText: Theme.textFaint
+        disabled.button: "#1a1e25"
+    }
+
     Component.onCompleted: Api.restoreSession()
 
     Loader {

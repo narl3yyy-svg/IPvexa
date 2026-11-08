@@ -88,12 +88,16 @@ func (s *Server) ptzCheck(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, err.Error())
 		return
 	}
-	presets, err := c.Check(r.Context())
+	presets, presetsErr, err := c.Check(r.Context())
 	if err != nil {
 		writeJSON(w, 200, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
-	writeJSON(w, 200, map[string]any{"ok": true, "presets": len(presets)})
+	resp := map[string]any{"ok": true, "presets": len(presets), "presets_supported": presetsErr == nil}
+	if presetsErr != nil {
+		resp["presets_error"] = presetsErr.Error()
+	}
+	writeJSON(w, 200, resp)
 }
 
 func (s *Server) ptzMove(w http.ResponseWriter, r *http.Request) {

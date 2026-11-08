@@ -138,10 +138,8 @@ Item {
         MenuItem { text: "Save current position…"; onTriggered: presetName.open() }
     }
 
-    Dialog {
+    AppDialog {
         id: presetName
-        parent: Overlay.overlay
-        anchors.centerIn: parent
         modal: true
         title: "Save PTZ preset"
         standardButtons: Dialog.Save | Dialog.Cancel

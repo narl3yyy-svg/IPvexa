@@ -38,6 +38,7 @@ qt_add_qml_module(ipvexa
         qml/IconButton.qml
         qml/ToolText.qml
         qml/PtzControls.qml
+        qml/AppDialog.qml
 )
 
 target_link_libraries(ipvexa PRIVATE

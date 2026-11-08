@@ -134,6 +134,15 @@ Item {
         } catch (e) {}
         filler.start()
     }
+    // --camera-settings <id>: open that camera's settings on start (testing / support).
+    Timer {
+        interval: 1500; running: Qt.application.arguments.indexOf("--camera-settings") >= 0
+        onTriggered: {
+            var a = Qt.application.arguments
+            var cam = Theme.findCamera(Api.cameras, parseInt(a[a.indexOf("--camera-settings") + 1]))
+            if (cam) { cameraDialog.load(cam); cameraDialog.open() }
+        }
+    }
     // First run: wait for the camera list, then fill a layout automatically.
     Timer {
         id: filler
@@ -274,10 +283,9 @@ Item {
 
     CameraDialog { id: cameraDialog; anchors.centerIn: parent }
 
-    Dialog {
+    AppDialog {
         id: saveDialog
         title: "Save layout"
-        anchors.centerIn: parent
         modal: true
         standardButtons: Dialog.Save | Dialog.Cancel
         onOpened: { nameField.text = root.layoutName; nameField.selectAll(); nameField.forceActiveFocus() }

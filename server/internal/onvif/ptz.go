@@ -39,10 +39,18 @@ type Client struct {
 	http *http.Client
 	mu   sync.Mutex
 	init bool
-	skew time.Duration // camera clock minus our clock, for WS-Security timestamps
+	skew time.Duration // camera clock minus our clock, as the camera reports it
 	ptz  string
 	med  string
 	prof string
+
+	// Cameras disagree on WS-Security: some only accept a password digest, others
+	// only plain text, and some report a wrong clock but check against the real one.
+	// We try the combinations once and remember the one that works.
+	authMu    sync.Mutex
+	authKnown bool
+	authText  bool // PasswordText instead of PasswordDigest
+	authSkew  bool // timestamp in the camera's reported clock
 }
 
 func New(deviceURL, user, pass string) *Client {
@@ -55,34 +63,51 @@ func xmlEscape(s string) string {
 	return b.String()
 }
 
-func (c *Client) securityHeader() string {
+func (c *Client) securityHeader(text, useSkew bool) string {
 	if c.User == "" {
 		return ""
 	}
 	nonce := make([]byte, 16)
 	rand.Read(nonce)
-	created := time.Now().Add(c.skew).UTC().Format("2006-01-02T15:04:05.000Z")
-	h := sha1.New()
-	h.Write(nonce)
-	h.Write([]byte(created))
-	h.Write([]byte(c.Pass))
-	digest := base64.StdEncoding.EncodeToString(h.Sum(nil))
+	now := time.Now()
+	if useSkew {
+		now = now.Add(c.skew)
+	}
+	created := now.UTC().Format("2006-01-02T15:04:05.000Z")
+	pwType := "PasswordDigest"
+	pw := ""
+	if text {
+		// Plain-text fallback, only used when the camera rejects digests. It stays on the LAN.
+		pwType = "PasswordText"
+		pw = xmlEscape(c.Pass)
+	} else {
+		h := sha1.New()
+		h.Write(nonce)
+		h.Write([]byte(created))
+		h.Write([]byte(c.Pass))
+		pw = base64.StdEncoding.EncodeToString(h.Sum(nil))
+	}
 	return `<s:Header><wsse:Security s:mustUnderstand="1" xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd" xmlns:wsu="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd">` +
 		`<wsse:UsernameToken><wsse:Username>` + xmlEscape(c.User) + `</wsse:Username>` +
-		`<wsse:Password Type="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordDigest">` + digest + `</wsse:Password>` +
+		`<wsse:Password Type="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#` + pwType + `">` + pw + `</wsse:Password>` +
 		`<wsse:Nonce EncodingType="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-soap-message-security-1.0#Base64Binary">` + base64.StdEncoding.EncodeToString(nonce) + `</wsse:Nonce>` +
 		`<wsu:Created>` + created + `</wsu:Created></wsse:UsernameToken></wsse:Security></s:Header>`
 }
 
-var faultTextRe = regexp.MustCompile(`(?s)<(?:\w+:)?Text[^>]*>(.*?)</(?:\w+:)?Text>`)
-var faultCodeRe = regexp.MustCompile(`(?s)<(?:\w+:)?Subcode>\s*<(?:\w+:)?Value>(.*?)</`)
+var faultTextRe = regexp.MustCompile(`(?s)<(?:[\w.-]+:)?Text[^>]*>(.*?)</(?:[\w.-]+:)?Text>`)
+var faultCodeRe = regexp.MustCompile(`(?s)<(?:[\w.-]+:)?Subcode>\s*<(?:[\w.-]+:)?Value>(.*?)</`)
 
-func (c *Client) call(ctx context.Context, url, body string, auth bool) (string, error) {
+var errAuth = errors.New("camera rejected the ONVIF login (check the ONVIF username/password in camera settings)")
+
+// errNotFound means nothing answers at that ONVIF address.
+var errNotFound = errors.New("no ONVIF service at this address")
+
+func (c *Client) callOnce(ctx context.Context, url, body string, auth, text, useSkew bool) (string, error) {
 	env := `<?xml version="1.0" encoding="UTF-8"?><s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"` +
 		` xmlns:tds="http://www.onvif.org/ver10/device/wsdl" xmlns:trt="http://www.onvif.org/ver10/media/wsdl"` +
 		` xmlns:tptz="http://www.onvif.org/ver20/ptz/wsdl" xmlns:tt="http://www.onvif.org/ver10/schema">`
 	if auth {
-		env += c.securityHeader()
+		env += c.securityHeader(text, useSkew)
 	}
 	env += `<s:Body>` + body + `</s:Body></s:Envelope>`
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(env))
@@ -97,42 +122,95 @@ func (c *Client) call(ctx context.Context, url, body string, auth bool) (string,
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	s := string(data)
-	if resp.StatusCode != 200 || strings.Contains(s, ":Fault>") {
-		msg := ""
-		if m := faultTextRe.FindStringSubmatch(s); m != nil {
-			msg = strings.TrimSpace(m[1])
-		}
-		if m := faultCodeRe.FindStringSubmatch(s); m != nil && strings.Contains(m[1], "NotAuthorized") {
-			msg = "camera rejected the ONVIF login (check the ONVIF username/password)"
-		}
-		if resp.StatusCode == 401 {
-			msg = "camera rejected the ONVIF login (check the ONVIF username/password)"
-		}
-		if msg == "" {
-			msg = fmt.Sprintf("ONVIF error (HTTP %d)", resp.StatusCode)
-		}
-		return s, errors.New(msg)
+	if resp.StatusCode == 200 && !strings.Contains(s, ":Fault>") {
+		return s, nil
 	}
-	return s, nil
+	isSOAP := strings.Contains(s, "Envelope")
+	if resp.StatusCode == 404 || (!isSOAP && resp.StatusCode != 200 && resp.StatusCode != 401) {
+		return s, errNotFound
+	}
+	if m := faultCodeRe.FindStringSubmatch(s); m != nil &&
+		(strings.Contains(m[1], "NotAuthorized") || strings.Contains(m[1], "FailedAuthentication")) {
+		return s, errAuth
+	}
+	if resp.StatusCode == 401 {
+		if !isSOAP {
+			return s, errNotFound // some servers answer unknown paths with a bare 401
+		}
+		return s, errAuth
+	}
+	msg := ""
+	if m := faultTextRe.FindStringSubmatch(s); m != nil {
+		msg = strings.TrimSpace(m[1])
+	}
+	if msg == "" {
+		msg = fmt.Sprintf("ONVIF error (HTTP %d)", resp.StatusCode)
+	}
+	return s, errors.New(msg)
+}
+
+func (c *Client) call(ctx context.Context, url, body string, auth bool) (string, error) {
+	if !auth || c.User == "" {
+		return c.callOnce(ctx, url, body, false, false, false)
+	}
+	c.authMu.Lock()
+	known, text, useSkew := c.authKnown, c.authText, c.authSkew
+	c.authMu.Unlock()
+	if known {
+		s, err := c.callOnce(ctx, url, body, true, text, useSkew)
+		if err != errAuth {
+			return s, err
+		}
+		// Some cameras don't check logins on every request, so the remembered
+		// format may never have really been accepted: negotiate again.
+		c.authMu.Lock()
+		c.authKnown = false
+		c.authMu.Unlock()
+	}
+	combos := [][2]bool{{false, false}, {true, false}}
+	if c.skew != 0 {
+		combos = append(combos, [2]bool{false, true}, [2]bool{true, true})
+	}
+	var s string
+	var err error
+	for _, cb := range combos {
+		s, err = c.callOnce(ctx, url, body, true, cb[0], cb[1])
+		if err == nil {
+			c.authMu.Lock()
+			c.authKnown, c.authText, c.authSkew = true, cb[0], cb[1]
+			c.authMu.Unlock()
+			return s, nil
+		}
+		if err != errAuth {
+			return s, err
+		}
+	}
+	return s, err
 }
 
 var (
-	svcRe     = regexp.MustCompile(`(?s)<(?:\w+:)?Namespace>\s*([^<\s]+)\s*</(?:\w+:)?Namespace>\s*<(?:\w+:)?XAddr>\s*([^<\s]+)\s*<`)
-	capPTZRe  = regexp.MustCompile(`(?s)<(?:\w+:)?PTZ>\s*<(?:\w+:)?XAddr>\s*([^<\s]+)\s*<`)
-	capMedRe  = regexp.MustCompile(`(?s)<(?:\w+:)?Media>\s*<(?:\w+:)?XAddr>\s*([^<\s]+)\s*<`)
-	profileRe = regexp.MustCompile(`<(?:\w+:)?Profiles[^>]*\stoken="([^"]+)"`)
-	presetRe  = regexp.MustCompile(`(?s)<(?:\w+:)?Preset[^>]*\stoken="([^"]*)"[^>]*>(.*?)</(?:\w+:)?Preset>`)
-	nameRe    = regexp.MustCompile(`<(?:\w+:)?Name>([^<]*)<`)
-	utcRe     = regexp.MustCompile(`(?s)<(?:\w+:)?UTCDateTime>.*?<(?:\w+:)?Year>(\d+)<.*?<(?:\w+:)?Month>(\d+)<.*?<(?:\w+:)?Day>(\d+)<.*?<(?:\w+:)?Hour>(\d+)<.*?<(?:\w+:)?Minute>(\d+)<.*?<(?:\w+:)?Second>(\d+)<`)
-	tokenRe   = regexp.MustCompile(`<(?:\w+:)?PresetToken>([^<]+)<`)
+	svcRe     = regexp.MustCompile(`(?s)<(?:[\w.-]+:)?Namespace>\s*([^<\s]+)\s*</(?:[\w.-]+:)?Namespace>\s*<(?:[\w.-]+:)?XAddr>\s*([^<\s]+)\s*<`)
+	capPTZRe  = regexp.MustCompile(`(?s)<(?:[\w.-]+:)?PTZ>\s*<(?:[\w.-]+:)?XAddr>\s*([^<\s]+)\s*<`)
+	capMedRe  = regexp.MustCompile(`(?s)<(?:[\w.-]+:)?Media>\s*<(?:[\w.-]+:)?XAddr>\s*([^<\s]+)\s*<`)
+	profileRe = regexp.MustCompile(`<(?:[\w.-]+:)?Profiles[^>]*\stoken="([^"]+)"`)
+	presetRe  = regexp.MustCompile(`(?s)<(?:[\w.-]+:)?Preset[^>]*\stoken="([^"]*)"[^>]*>(.*?)</(?:[\w.-]+:)?Preset>`)
+	nameRe    = regexp.MustCompile(`<(?:[\w.-]+:)?Name>([^<]*)<`)
+	utcRe     = regexp.MustCompile(`(?s)<(?:[\w.-]+:)?UTCDateTime>.*?<(?:[\w.-]+:)?Year>(\d+)<.*?<(?:[\w.-]+:)?Month>(\d+)<.*?<(?:[\w.-]+:)?Day>(\d+)<.*?<(?:[\w.-]+:)?Hour>(\d+)<.*?<(?:[\w.-]+:)?Minute>(\d+)<.*?<(?:[\w.-]+:)?Second>(\d+)<`)
+	tokenRe   = regexp.MustCompile(`<(?:[\w.-]+:)?PresetToken>([^<]+)<`)
 )
+
+// siblingURL returns the device service URL with its last path element replaced.
+func (c *Client) siblingURL(name string) string {
+	i := strings.LastIndex(c.DeviceURL, "/")
+	return c.DeviceURL[:i+1] + name
+}
 
 // setup finds the PTZ and media services and the first media profile. Caller holds c.mu.
 func (c *Client) setup(ctx context.Context) error {
 	if c.init {
 		return nil
 	}
-	// Match the camera's clock so WS-Security timestamps are accepted.
+	// Note the camera's reported clock; used only if logins fail with our own clock.
 	if s, err := c.call(ctx, c.DeviceURL, `<tds:GetSystemDateAndTime/>`, false); err == nil {
 		if m := utcRe.FindStringSubmatch(s); m != nil {
 			var y, mo, d, h, mi, se int
@@ -160,22 +238,17 @@ func (c *Client) setup(ctx context.Context) error {
 		}
 	}
 	if c.ptz == "" || c.med == "" {
-		s, err := c.call(ctx, c.DeviceURL, `<tds:GetCapabilities><tds:Category>All</tds:Category></tds:GetCapabilities>`, true)
-		if err != nil && c.med == "" {
-			return err
+		if s, err := c.call(ctx, c.DeviceURL, `<tds:GetCapabilities><tds:Category>All</tds:Category></tds:GetCapabilities>`, true); err == nil {
+			if m := capPTZRe.FindStringSubmatch(s); m != nil && c.ptz == "" {
+				c.ptz = m[1]
+			}
+			if m := capMedRe.FindStringSubmatch(s); m != nil && c.med == "" {
+				c.med = m[1]
+			}
 		}
-		if m := capPTZRe.FindStringSubmatch(s); m != nil && c.ptz == "" {
-			c.ptz = m[1]
-		}
-		if m := capMedRe.FindStringSubmatch(s); m != nil && c.med == "" {
-			c.med = m[1]
-		}
-	}
-	if c.ptz == "" {
-		return ErrNoPTZ
 	}
 	if c.med == "" {
-		return errors.New("camera has no ONVIF media service")
+		c.med = c.siblingURL("media_service")
 	}
 	s, err := c.call(ctx, c.med, `<trt:GetProfiles/>`, true)
 	if err != nil {
@@ -186,6 +259,27 @@ func (c *Client) setup(ctx context.Context) error {
 		return errors.New("camera returned no ONVIF media profiles")
 	}
 	c.prof = m[1]
+
+	// Some firmware (e.g. OpenIPC builds) serves PTZ without listing it: try the usual address.
+	if c.ptz == "" {
+		guess := c.siblingURL("ptz_service")
+		// Any real SOAP answer (even "GetNodes is not supported") means a PTZ service is there.
+		_, err := c.call(ctx, guess, `<tptz:GetNodes/>`, true)
+		switch err {
+		case nil:
+			c.ptz = guess
+		case errAuth:
+			return err
+		case errNotFound:
+		default:
+			if !strings.HasPrefix(err.Error(), "camera did not answer") {
+				c.ptz = guess
+			}
+		}
+	}
+	if c.ptz == "" {
+		return ErrNoPTZ
+	}
 	c.init = true
 	return nil
 }
@@ -201,8 +295,26 @@ func (c *Client) ptzCall(ctx context.Context, body string) (string, error) {
 	return c.call(ctx, ptz, strings.ReplaceAll(body, "{P}", xmlEscape(prof)), true)
 }
 
-// Check verifies that PTZ is reachable and returns the presets.
-func (c *Client) Check(ctx context.Context) ([]Preset, error) { return c.Presets(ctx) }
+// Check verifies that PTZ is reachable. Presets are optional: some cameras move
+// fine but don't implement presets, which is reported as presetsErr.
+func (c *Client) Check(ctx context.Context) (presets []Preset, presetsErr error, err error) {
+	c.mu.Lock()
+	err = c.setup(ctx)
+	c.mu.Unlock()
+	if err != nil {
+		return nil, nil, err
+	}
+	// A zero-speed move plus stop proves the camera accepts movement without moving it.
+	if err := c.ContinuousMove(ctx, 0, 0, 0); err != nil {
+		return nil, nil, fmt.Errorf("camera's PTZ service rejects movement: %w", err)
+	}
+	c.Stop(ctx)
+	presets, presetsErr = c.Presets(ctx)
+	if presetsErr == errAuth {
+		return nil, nil, presetsErr
+	}
+	return presets, presetsErr, nil
+}
 
 func clamp(v float64) float64 { return max(-1, min(1, v)) }
 
