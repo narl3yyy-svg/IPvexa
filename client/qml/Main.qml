@@ -10,7 +10,8 @@ ApplicationWindow {
     minimumWidth: 960
     minimumHeight: 600
     visible: true
-    title: Api.loggedIn ? "Ipvexa — " + Api.serverUrl.replace(/^https?:\/\//, "") : "Ipvexa"
+    // The desktop appends " — IPvexa" (the application display name) itself.
+    title: Api.loggedIn ? Api.serverUrl.replace(/^https?:\/\//, "") : ""
     color: Theme.bg
 
     // Dark palette for every control, popup and dialog. Set here (not only in C++)
@@ -48,12 +49,7 @@ ApplicationWindow {
         sourceComponent: Api.loggedIn ? mainView : loginView
     }
     Component { id: loginView; LoginView {} }
-    Component { id: mainView; MainView { window: window } }
-
-    Shortcut {
-        sequence: "F11"
-        onActivated: window.visibility = window.visibility === Window.FullScreen ? Window.Windowed : Window.FullScreen
-    }
+    Component { id: mainView; MainView {} }
 
     // Transient error toast.
     Rectangle {

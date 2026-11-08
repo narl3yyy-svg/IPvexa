@@ -1,6 +1,6 @@
-# Ipvexa — Plan
+# IPvexa — Plan
 
-**Ipvexa** is a self-hosted video management system for Linux, built to replace Blue Iris. It aims for the look and workflow of Nx Witness: a native desktop app, a timeline-first playback screen, and synced multi-camera playback. It is one purchase, never a subscription, and fully offline.
+**IPvexa** is a self-hosted video management system for Linux, built to replace Blue Iris. It aims for the look and workflow of Nx Witness: a native desktop app, a timeline-first playback screen, and synced multi-camera playback. It is one purchase, never a subscription, and fully offline.
 
 > The name: "IPV" from IPVMS plus "exa". At the time of choosing (2026-11-08) a web search and GitHub showed no product, company, user or repository called Ipvexa. That is not a legal trademark search: check USPTO/EUIPO before any commercial use.
 
@@ -18,7 +18,7 @@
 ## Architecture
 
 ```
- Ipvexa desktop app (Qt/QML)                 ipvexa-server (Go, systemd)
+ IPvexa desktop app (Qt/QML)                 ipvexa-server (Go, systemd)
  ┌───────────────────────────┐   HTTP/TS   ┌─────────────────────────────────────────┐
  │ Resource tree │ Video grid│◄───────────►│ API + login (bcrypt, sessions, roles)    │
  │               │ (N tiles) │   live      │ Per camera: ffmpeg → live fan-out (TS)   │
@@ -36,42 +36,30 @@
 
 ### ✅ v0.1 (built and tested on Ubuntu/Kubuntu 26.04 with Intel VAAPI)
 - Server: cameras (add/edit/delete), live streaming, 24/7 recording, segment index, timeline API, playback from any moment, retention, disk guard, ONVIF discovery, JPEG snapshots, login with roles, first-run admin password.
-- Desktop app: sign-in, Nx-style dark shell, resource tree with drag-and-drop, layouts (1, 2×2, 3×3, 4×4, 5×5, 1+5, 1+7, 1+12), 16:9 / 4:3 / Fill tile shapes, saved layouts, double-click to maximize, automatic substream/main-stream switching by tile size.
-- Desktop app, playback: hardware decoding, zoomable/draggable timeline with recorded footage, click-to-seek, synced playback across tiles, 1–16× speed (keyframe-only above 4×), LIVE button, "NO RECORDING" for gaps.
-- Camera dialog: templates for Dahua/Amcrest, OpenIPC, Thingino, Hikvision, Reolink, Uniview, Axis, generic RTSP and a demo pattern.
-- Packaging: systemd unit, desktop launcher, icon, `scripts/install-linux.sh`.
+- Desktop app: sign-in, dark shell, resource tree with drag-and-drop, layouts, tile shapes, synced playback on a zoomable timeline, 1–16× speed, hardware decoding.
+- Camera templates for Dahua/Amcrest, OpenIPC, Thingino, Hikvision, Reolink, Uniview, Axis, generic RTSP and a demo pattern.
 
-### Next phases
+### ✅ v0.2
+- **Look and layouts:** Nx-style shell and dialogs. Free-form layouts: drag to move or swap, corner resize, presets, layout tabs. Per-layout and per-tile **High/Low/Auto quality**, camera **full screen** and window full screen, digital zoom.
+- **Users:** Administrator/Operator/Viewer roles, per-user camera lists, playback/PTZ/export permissions, disabling accounts, password change in the app, password reset by admins or `ipvexa-server passwd`, audit log.
+- **Phase 2 — real cameras:** Dahua 4K H.265, OpenIPC (PTZ via ptzd) and Thingino verified. ONVIF stream detection fills in stream addresses. Health panel with bitrate, fps, reconnects, disk write rate and days of space left. Fixed black H.265 tiles and faster snapshots.
+- **Phase 3 — motion:** server-side motion detection on the substream (16×9 grid, sensitivity, painted ignore zones, lighting-change filter). Motion on the timeline, event list with thumbnails, previous/next event, **smart search** by area, bookmarks with notes, and **motion-only recording** (10 s before and after).
+- **Phase 4 — phone alerts:** ntfy-compatible feed served by the server itself (JSON stream, SSE, polling, Basic auth), so no cloud is involved. Rules: motion / offline / online / disk low × cameras × days and hours, with cooldown and priority, then notify (with snapshot and a tap-to-open link), bookmark or webhook.
+- **Phase 5 — pro features:** clip export to MP4 (original quality), bookmarks list, calendar date picker, digital zoom, users UI, audit log.
+- **Phase 6 — web/phone view:** a single self-contained page at `/web/` with a camera grid, live view, playback and the event list. Video is MJPEG, so any browser works with no plugins.
+- **Phase 7 — distribution:** `.deb` packages for the server (systemd, `ipvexa` system user) and the app (`scripts/build-deb.sh`), and an Arch PKGBUILD.
 
-**Phase 2 — Real-camera support (next)**
-- Test and tune Dahua 4K (H.265), OpenIPC PTZ and Thingino cameras (main/substreams, audio).
-- ONVIF Profile S: fetch stream URLs automatically after discovery (no URL typing).
-- PTZ controls on the tile (ONVIF; OpenIPC/Thingino specifics) with presets.
-- Health panel: bitrate, fps, dropped connections, disk write rate.
+### ✅ v0.3
+- **Linux installer:** `./install.sh` (Debian/Ubuntu and Arch) installs the build tools, builds packages, starts the service and adds the app to the menu. It can import a development setup and uninstall.
+- **Playback:** reverse playback, frame stepping, and a picture preview when hovering over the timeline.
+- **Layouts:** tours, video walls on other monitors, digital zoom saved per tile, and opening a zoomed area as its own tile.
+- **Server:** weekly recording schedules, server settings in the app, a total storage limit.
+- **Web view:** full-quality video (fragmented MP4, no re-encoding) with MJPEG as the fallback, and an SD/HD switch.
+- **Fixes:** camera passwords no longer appear in error messages, `ffprobe` can't stall indexing, stricter URL redaction, and more tests (18 Go test functions across 7 packages, 28 layout-engine checks).
 
-**Phase 3 — Motion and AI**
-- Motion detection on substreams (low fps, GPU decode), with zones and masks drawn on the image.
-- Motion drawn on the timeline (red), and **smart search**: draw a box and find motion only there.
-- Object detection (person/vehicle/animal) with ONNX Runtime + YOLO on NVIDIA GPUs (CUDA), with OpenVINO/CPU fallback.
-- Camera-side events: Dahua event stream, OpenIPC/Thingino motion hooks.
-- Event list with thumbnails, bookmarks with notes and tags.
-- Recording modes: motion-only and scheduled, with pre/post buffer.
-
-**Phase 4 — Phone notifications (offline-friendly)**
-- Ipvexa will serve an **ntfy-compatible** notification feed itself. The ntfy Android app (or any UnifiedPush app) subscribes to it over the LAN or your VPN, so no Google/Apple cloud is involved. Alerts include a snapshot and open playback at that moment.
-- iPhone caveat: iOS only delivers background notifications through Apple's servers. Fully offline iOS alerts need the app open, or a self-hosted relay. We'll pick the least-cloud option when we get there.
-- Rules: what (motion/person/offline/disk) × where (camera/zone) × when (schedule: Home/Away/Night) → actions (notify, record, bookmark, webhook, MQTT/Home Assistant). Includes cooldowns so one person walking by doesn't trigger 50 alerts.
-
-**Phase 5 — Pro features**
-- Clip export (MP4 with timestamp overlay) and a bookmarks list.
-- Calendar date picker, thumbnail strip on timeline hover, frame stepping, reverse playback.
-- Layout tours, multi-monitor video walls (one window per screen), digital zoom (and opening a zoomed region as its own tile).
-- Users and permissions UI, audit log, password change in the app.
-- Server settings in the app (storage paths, multiple disks, retention by disk size).
-
-**Phase 6 — Web/phone view**
-- A lightweight web UI served by ipvexa-server (live grid + timeline) for phones and browsers over the VPN.
-
-**Phase 7 — Distribution**
-- `.deb` packages (server + app), AUR PKGBUILD, AppImage of the desktop app.
-- Then macOS (Homebrew + .app) and Windows (service + installer).
+### Next
+- **AI object detection** (person/vehicle/animal) with ONNX Runtime + YOLO on the NVIDIA GPU (CUDA), with OpenVINO/CPU fallback. Best built and tuned on the production machine with the GTX 1080 Ti.
+- **Camera-side events:** the Dahua event stream and OpenIPC/Thingino motion hooks. These need the cameras' HTTP/ONVIF ports reachable from the server.
+- Multiple recording disks.
+- AppImage of the desktop app; then macOS (.dmg) and Windows (.exe installer).
+- iPhone alerts: iOS only delivers background notifications through Apple's servers. Fully offline iOS alerts need the app open, or a self-hosted relay.

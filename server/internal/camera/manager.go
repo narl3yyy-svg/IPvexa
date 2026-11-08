@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"ipvexa/internal/store"
 )
@@ -16,6 +18,8 @@ type Manager struct {
 	RecRoot string
 	FFmpeg  string
 	FFprobe string
+	// OnEvent is called when a motion event starts (started=true) and when it ends.
+	OnEvent func(e store.Event, started bool)
 
 	mu      sync.Mutex
 	idxMu   sync.Mutex // serialises indexing so a segment is never filed twice
@@ -29,16 +33,20 @@ type running struct {
 	sub    *Stream // nil when the camera has no substream
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
+	motion atomic.Bool // motion right now
+	mode   string      // recording mode in effect (see store.Camera.ModeAt)
 }
 
 type CameraStatus struct {
-	Main *StreamStatus `json:"main,omitempty"`
-	Sub  *StreamStatus `json:"sub,omitempty"`
+	Main   *StreamStatus `json:"main,omitempty"`
+	Sub    *StreamStatus `json:"sub,omitempty"`
+	Motion bool          `json:"motion"`
 }
 
 func (m *Manager) Start(ctx context.Context) error {
 	m.ctx = ctx
 	m.running = map[int64]*running{}
+	m.Store.CloseOpenEvents()
 	cams, err := m.Store.Cameras()
 	if err != nil {
 		return err
@@ -47,7 +55,34 @@ func (m *Manager) Start(ctx context.Context) error {
 		m.Apply(c)
 	}
 	go m.runIndexer(ctx)
+	go m.runScheduler(ctx)
 	return nil
+}
+
+// runScheduler restarts cameras whose recording schedule switches mode.
+func (m *Manager) runScheduler(ctx context.Context) {
+	t := time.NewTicker(20 * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		now := time.Now()
+		var due []store.Camera
+		m.mu.Lock()
+		for _, r := range m.running {
+			if len(r.cam.RecordSchedule) > 0 && r.cam.ModeAt(now) != r.mode {
+				due = append(due, r.cam)
+			}
+		}
+		m.mu.Unlock()
+		for _, c := range due {
+			slog.Info("recording schedule: switching mode", "camera", c.ID, "mode", c.ModeAt(now))
+			m.Apply(c)
+		}
+	}
 }
 
 // IncomingDir is where ffmpeg writes segments before the indexer files them away.
@@ -62,15 +97,19 @@ func (m *Manager) Apply(c store.Camera) {
 		return
 	}
 	ctx, cancel := context.WithCancel(m.ctx)
-	r := &running{cam: c, cancel: cancel}
+	mode := c.ModeAt(time.Now())
+	r := &running{cam: c, cancel: cancel, mode: mode}
+	// Motion-only recording records continuously too; footage without motion is
+	// removed shortly afterwards by retention (which gives free pre/post buffers).
+	recording := mode == "continuous" || mode == "motion"
 	mainRec := ""
-	if c.RecordMode == "continuous" {
+	if recording {
 		mainRec = m.IncomingDir(c.ID, "main")
 	}
 	r.main = &Stream{CameraID: c.ID, Kind: "main", URL: c.MainURL, Transport: c.Transport, RecordDir: mainRec, Hub: NewHub(), FFmpeg: m.FFmpeg}
 	if c.SubURL != "" {
 		subRec := ""
-		if c.RecordMode == "continuous" && c.RecordSub {
+		if recording && c.RecordSub {
 			subRec = m.IncomingDir(c.ID, "sub")
 		}
 		r.sub = &Stream{CameraID: c.ID, Kind: "sub", URL: c.SubURL, Transport: c.Transport, RecordDir: subRec, Hub: NewHub(), FFmpeg: m.FFmpeg}
@@ -82,10 +121,14 @@ func (m *Manager) Apply(c store.Camera) {
 		r.wg.Add(1)
 		go func(s *Stream) { defer r.wg.Done(); s.Run(ctx) }(s)
 	}
+	if c.Motion {
+		r.wg.Add(1)
+		go func() { defer r.wg.Done(); m.runMotion(ctx, r) }()
+	}
 	m.mu.Lock()
 	m.running[c.ID] = r
 	m.mu.Unlock()
-	slog.Info("camera started", "id", c.ID, "name", c.Name, "record", c.RecordMode)
+	slog.Info("camera started", "id", c.ID, "name", c.Name, "record", mode, "motion", c.Motion)
 }
 
 func (m *Manager) Stop(id int64) {
@@ -138,6 +181,7 @@ func (m *Manager) Status(id int64) CameraStatus {
 	}
 	st := r.main.Status()
 	cs.Main = &st
+	cs.Motion = r.motion.Load()
 	if r.sub != nil {
 		st2 := r.sub.Status()
 		cs.Sub = &st2

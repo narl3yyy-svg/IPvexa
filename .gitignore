@@ -11,3 +11,6 @@ server/bin/
 id_rsa*
 id_ed25519*
 *.env
+
+# Built packages
+dist/

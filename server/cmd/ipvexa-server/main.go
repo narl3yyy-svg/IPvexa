@@ -1,4 +1,4 @@
-// ipvexa-server records IP cameras and serves live and recorded video to Ipvexa clients.
+// ipvexa-server records IP cameras and serves live and recorded video to IPvexa clients.
 package main
 
 import (
@@ -22,6 +22,7 @@ import (
 
 	"ipvexa/internal/api"
 	"ipvexa/internal/camera"
+	"ipvexa/internal/notify"
 	"ipvexa/internal/storage"
 	"ipvexa/internal/store"
 )
@@ -87,22 +88,64 @@ func main() {
 	defer stop()
 
 	mgr := &camera.Manager{Store: db, RecRoot: *recDir, FFmpeg: *ffmpeg, FFprobe: *ffprobe}
+	notifier := notify.New(db)
+	thumbDir := filepath.Join(*dataDir, "thumbs")
+	apiServer := &api.Server{Store: db, Cams: mgr, RecRoot: *recDir, DataDir: *dataDir, FFmpeg: *ffmpeg, MinFreePct: *minFree,
+		Notify: notifier, ThumbDir: thumbDir}
+	notifier.Snapshot = func(ctx context.Context, camID int64) ([]byte, error) { return apiServer.LiveJPEG(ctx, camID, "sub") }
+	camName := func(id int64) string {
+		if c, err := db.Camera(id); err == nil {
+			return c.Name
+		}
+		return fmt.Sprintf("camera %d", id)
+	}
+	mgr.OnEvent = func(e store.Event, started bool) {
+		if started && e.Kind == "motion" {
+			go apiServer.SaveThumb(e)
+			notifier.Handle(notify.Event{Trigger: "motion", CameraID: e.CameraID, Camera: camName(e.CameraID), Time: time.UnixMilli(e.Start)})
+		}
+	}
 	if err := mgr.Start(ctx); err != nil {
 		fatal("start cameras", "err", err)
 	}
-	ret := &storage.Retention{Store: db, RecRoot: *recDir, MinFreePct: *minFree}
+	ret := &storage.Retention{Store: db, RecRoot: *recDir, MinFreePct: *minFree, ThumbDir: thumbDir}
 	go ret.Run(ctx)
+	go notifier.Watch(ctx, func() []notify.CameraState {
+		cams, _ := db.Cameras()
+		out := make([]notify.CameraState, 0, len(cams))
+		for _, c := range cams {
+			st := mgr.Status(c.ID)
+			cs := notify.CameraState{ID: c.ID, Name: c.Name, Enabled: c.Enabled}
+			if st.Main != nil {
+				cs.Online = st.Main.State == "online"
+				cs.Error = st.Main.LastError
+			}
+			out = append(out, cs)
+		}
+		return out
+	}, func() float64 {
+		free, err := storage.FreePct(*recDir)
+		if err != nil {
+			return 100
+		}
+		return free
+	}, func() float64 { return db.Server(*minFree).MinFreePct })
 	go func() {
 		t := time.NewTicker(time.Hour)
 		defer t.Stop()
-		for range t.C {
-			db.PurgeSessions()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				db.PurgeSessions()
+			}
 		}
 	}()
 
 	srv := &http.Server{
 		Addr:              *listen,
-		Handler:           (&api.Server{Store: db, Cams: mgr, RecRoot: *recDir, FFmpeg: *ffmpeg}).Handler(),
+		Handler:           apiServer.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	go func() {
@@ -111,7 +154,7 @@ func main() {
 		defer cancel()
 		srv.Shutdown(sctx)
 	}()
-	slog.Info("Ipvexa server started", "version", api.Version, "listen", *listen, "data", *dataDir, "recordings", *recDir)
+	slog.Info("IPvexa server started", "version", api.Version, "listen", *listen, "data", *dataDir, "recordings", *recDir)
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		fatal("http server", "err", err)
 	}

@@ -9,11 +9,23 @@ Rectangle {
     property string tip: ""
     property bool active: false
     property color hoverColor: "#40ffffff"
+    property string label: ""       // text instead of an icon (e.g. "HD")
     signal clicked()
 
-    width: 22; height: 22; radius: 4
+    width: label !== "" ? labelText.implicitWidth + 10 : 22
+    height: 22; radius: 4
     color: ma.pressed ? Theme.accent : active ? "#a02fa8e0" : ma.containsMouse ? hoverColor : "#90000000"
-    TileIcon { anchors.centerIn: parent; kind: root.icon; color: "white"; width: 12; height: 12 }
+    TileIcon { visible: root.label === ""; anchors.centerIn: parent; kind: root.icon; color: "white"; width: 12; height: 12 }
+    Text {
+        id: labelText
+        visible: root.label !== ""
+        anchors.centerIn: parent
+        text: root.label
+        color: "white"
+        font.pixelSize: 10
+        font.weight: Font.Bold
+        font.letterSpacing: 0.5
+    }
     MouseArea {
         id: ma
         anchors.fill: parent

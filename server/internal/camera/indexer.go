@@ -126,7 +126,10 @@ func (m *Manager) finalize(camID int64, stream string, f incomingFile) {
 }
 
 func (m *Manager) probeDuration(path string) float64 {
-	out, err := exec.Command(m.FFprobe, "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", path).Output()
+	// A damaged file must not stall indexing for every camera.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, m.FFprobe, "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", path).Output()
 	if err != nil {
 		return 0
 	}

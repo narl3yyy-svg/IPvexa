@@ -14,9 +14,12 @@ extern "C" {
 int main(int argc, char *argv[])
 {
     QGuiApplication app(argc, argv);
+    // These names locate the saved settings (~/.config/Ipvexa); the visible name is
+    // the display name below.
     app.setApplicationName("Ipvexa");
     app.setOrganizationName("Ipvexa");
-    app.setApplicationVersion("0.1.0");
+    app.setApplicationDisplayName("IPvexa");
+    app.setApplicationVersion("0.3.0");
     app.setDesktopFileName("ipvexa");
 
     // FFmpeg's own messages (e.g. a camera's damaged first frames) are only useful when

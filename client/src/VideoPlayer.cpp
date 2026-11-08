@@ -207,7 +207,10 @@ SessionResult runSession(VideoPlayer *p, Interrupt *intr, const QString &url, bo
     AVDictionary *opts = nullptr;
     av_dict_set(&opts, "rw_timeout", "8000000", 0);
     if (live) {
-        av_dict_set(&opts, "fflags", "nobuffer", 0);
+        // No "fflags nobuffer" here: during stream probing it would throw away the
+        // packets read so far, including the keyframe the server sends first. Streams
+        // with long keyframe intervals (e.g. Dahua HEVC) then stay black. The flag is
+        // set after probing instead.
         av_dict_set(&opts, "max_delay", "0", 0);
         av_dict_set(&opts, "probesize", "1000000", 0);
         av_dict_set(&opts, "analyzeduration", "1000000", 0);
@@ -219,8 +222,6 @@ SessionResult runSession(VideoPlayer *p, Interrupt *intr, const QString &url, bo
         return res;
     }
     av_dict_free(&opts);
-    if (live)
-        fmt->flags |= AVFMT_FLAG_NOBUFFER;
 
     AVCodecContext *dec = nullptr;
     AVBufferRef *hwDev = nullptr;
@@ -247,6 +248,8 @@ SessionResult runSession(VideoPlayer *p, Interrupt *intr, const QString &url, bo
         cleanup();
         return res;
     }
+    if (live)
+        fmt->flags |= AVFMT_FLAG_NOBUFFER; // probed packets stay queued; new ones aren't buffered
     AVStream *st = fmt->streams[vs];
     dec = avcodec_alloc_context3(codec);
     avcodec_parameters_to_context(dec, st->codecpar);
@@ -338,7 +341,7 @@ SessionResult runSession(VideoPlayer *p, Interrupt *intr, const QString &url, bo
                             .arg(QString(codec->name).toUpper())
                             .arg(f->width).arg(f->height)
                             .arg(fps, 0, 'f', fps < 10 ? 1 : 0)
-                            .arg(hwName));
+                            .arg(hwName), fps);
         }
         return true;
     };
@@ -538,11 +541,13 @@ void VideoPlayer::postState(const QString &state)
     }, Qt::QueuedConnection);
 }
 
-void VideoPlayer::postInfo(const QString &info)
+void VideoPlayer::postInfo(const QString &info, double fps)
 {
-    QMetaObject::invokeMethod(this, [this, info]() {
+    QMetaObject::invokeMethod(this, [this, info, fps]() {
         if (m_info != info) {
             m_info = info;
+            if (fps >= 3) // ignore rates measured while paused or stalled
+                m_fps = fps;
             emit infoChanged();
         }
     }, Qt::QueuedConnection);

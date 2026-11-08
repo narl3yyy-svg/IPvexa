@@ -12,6 +12,9 @@ Rectangle {
     property int selectedIndex: -1
     property int maximizedIndex: -1
     property Item dragLayer
+    property string quality: "auto"
+    property int searchIndex: -1       // tile showing the smart-search area
+    property string searchCells: ""
 
     signal itemSelected(int index)
     signal maximizeToggled(int index)
@@ -21,6 +24,12 @@ Rectangle {
     signal cameraDropped(int cameraId, int x, int y)
     signal itemMoved(int index, int x, int y)
     signal itemResized(int index, int w, int h)
+    signal itemQualityPicked(int index, string q)
+    signal itemAreaChosen(int index, string cells)
+    signal itemZoomCommitted(int index, var z)
+    signal itemDuplicateRequested(int index)
+    property real selectedFps: 0
+    property bool interactive: true   // false on video-wall windows: no editing
     signal backgroundMenuRequested()
 
     readonly property var items: layout && layout.items ? layout.items : []
@@ -62,6 +71,7 @@ Rectangle {
             border.color: cellDrop.containsDrag ? Theme.accent : "#1c2428"
             border.width: 1
             Column {
+                visible: root.interactive
                 anchors.centerIn: parent
                 spacing: 4
                 opacity: cellDrop.containsDrag ? 1 : cellHover.hovered ? 0.8 : 0.35
@@ -77,6 +87,7 @@ Rectangle {
             HoverHandler { id: cellHover }
             DropArea {
                 id: cellDrop
+                enabled: root.interactive
                 anchors.fill: parent
                 keys: ["camera", "tile"]
                 onDropped: (ev) => {
@@ -106,6 +117,11 @@ Rectangle {
             selected: root.selectedIndex === index
             maximized: isMax
             dragLayer: root.dragLayer
+            sceneQuality: root.quality
+            qualityOverride: it.q || ""
+            searchCells: root.searchIndex === index ? root.searchCells : ""
+            zoomState: it.z
+            editable: root.interactive
             visible: root.maximizedIndex < 0 || isMax
             z: isMax ? 2 : selected ? 1 : 0
             x: isMax ? root.pad : root.originX + it.x * root.cellW + root.gap / 2
@@ -118,6 +134,11 @@ Rectangle {
             onFullscreenRequested: root.fullscreenRequested(index)
             onCloseRequested: root.removeRequested(index)
             onSettingsRequested: root.cameraSettingsRequested(it.cam)
+            onQualityPicked: (q) => root.itemQualityPicked(index, q)
+            onAreaChosen: (cells) => root.itemAreaChosen(index, cells)
+            onZoomCommitted: (z) => root.itemZoomCommitted(index, z)
+            onZoomTileRequested: root.itemDuplicateRequested(index)
+            Binding { target: root; property: "selectedFps"; value: tile.fps; when: tile.selected }
             onCameraDropped: (camId) => root.cameraDropped(camId, it.x, it.y)
             onTileDropped: (from) => root.itemMoved(from, it.x, it.y)
             onResizeMoved: (p) => {
@@ -157,7 +178,7 @@ Rectangle {
 
     // Empty layout hint
     Column {
-        visible: root.items.length === 0
+        visible: root.items.length === 0 && root.interactive
         anchors.centerIn: parent
         spacing: 8
         z: 3

@@ -80,7 +80,7 @@ Rectangle {
                 }
             }
         }
-        Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
+        Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: Theme.border }
 
         Flickable {
             id: flick
@@ -176,7 +176,7 @@ Rectangle {
                         Menu {
                             id: menu
                             MenuItem { text: "Add to layout"; onTriggered: root.cameraActivated(del.modelData) }
-                            MenuItem { text: "Camera settings…"; enabled: Api.role === "admin"; onTriggered: root.editCamera(del.modelData) }
+                            MenuItem { text: "Camera settings…"; enabled: Api.isAdmin; onTriggered: root.editCamera(del.modelData) }
                         }
                         Rectangle {
                             id: proxy
@@ -275,9 +275,9 @@ Rectangle {
         }
 
         // ---- Add camera ----
-        Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border; visible: Api.role === "admin" }
+        Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: Theme.border; visible: Api.isAdmin }
         Rectangle {
-            visible: Api.role === "admin"
+            visible: Api.isAdmin
             Layout.fillWidth: true
             Layout.preferredHeight: 40
             color: addMa.containsMouse ? Theme.panelAlt : "transparent"

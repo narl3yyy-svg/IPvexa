@@ -1,4 +1,4 @@
-// Package api is Ipvexa's HTTP interface, used by the desktop client and (later) the web/phone UI.
+// Package api is IPvexa's HTTP interface, used by the desktop client, the web view and phones.
 package api
 
 import (
@@ -20,17 +20,26 @@ import (
 
 	"ipvexa/internal/camera"
 	"ipvexa/internal/discovery"
+	"ipvexa/internal/motion"
+	"ipvexa/internal/notify"
 	"ipvexa/internal/storage"
 	"ipvexa/internal/store"
+	"ipvexa/internal/web"
 )
 
-const Version = "0.1.0"
+const Version = "0.3.0"
 
 type Server struct {
 	Store   *store.Store
 	Cams    *camera.Manager
 	RecRoot string
+	DataDir string
 	FFmpeg  string
+	// MinFreePct is the default minimum free disk space (the -min-free flag).
+	MinFreePct float64
+	Notify     *notify.Notifier // optional
+	// ThumbDir holds event thumbnails (optional).
+	ThumbDir string
 
 	ptz ptzHub
 }
@@ -41,30 +50,84 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/info", s.info)
 	mux.HandleFunc("POST /api/login", s.login)
+	web.Register(mux)
+	if s.Notify != nil {
+		s.Notify.Auth = s.feedAuth
+		s.Notify.Register(mux)
+	}
 
 	auth := func(role string, h http.HandlerFunc) http.Handler { return s.requireAuth(role, h) }
 	mux.Handle("POST /api/logout", auth("viewer", s.logout))
 	mux.Handle("GET /api/me", auth("viewer", s.me))
+	mux.Handle("POST /api/me/password", auth("viewer", s.changeOwnPassword))
 	mux.Handle("GET /api/system", auth("viewer", s.system))
 	mux.Handle("GET /api/cameras", auth("viewer", s.listCameras))
 	mux.Handle("POST /api/cameras", auth("admin", s.createCamera))
-	mux.Handle("GET /api/cameras/{id}", auth("viewer", s.getCamera))
+	mux.Handle("GET /api/cameras/{id}", auth("viewer", s.camPerm("", s.getCamera)))
 	mux.Handle("PUT /api/cameras/{id}", auth("admin", s.updateCamera))
 	mux.Handle("DELETE /api/cameras/{id}", auth("admin", s.deleteCamera))
 	mux.Handle("GET /api/cameras/{id}/log", auth("admin", s.cameraLog))
-	mux.Handle("GET /api/cameras/{id}/live", auth("viewer", s.live))
-	mux.Handle("GET /api/cameras/{id}/snapshot", auth("viewer", s.snapshot))
-	mux.Handle("GET /api/cameras/{id}/timeline", auth("viewer", s.timeline))
-	mux.Handle("GET /api/cameras/{id}/playback", auth("viewer", s.playback))
+	mux.Handle("GET /api/cameras/{id}/live", auth("viewer", s.camPerm("", s.live)))
+	mux.Handle("GET /api/cameras/{id}/snapshot", auth("viewer", s.camPerm("", s.snapshot)))
+	mux.Handle("GET /api/cameras/{id}/mjpeg", auth("viewer", s.camPerm("", s.mjpeg)))
+	mux.Handle("GET /api/cameras/{id}/fmp4", auth("viewer", s.camPerm("", s.fmp4)))
+	mux.Handle("GET /api/cameras/{id}/timeline", auth("viewer", s.camPerm("playback", s.timeline)))
+	mux.Handle("GET /api/cameras/{id}/playback", auth("viewer", s.camPerm("playback", s.playback)))
 	mux.Handle("GET /api/discover", auth("admin", s.discover))
-	mux.Handle("GET /api/cameras/{id}/ptz/check", auth("operator", s.ptzCheck))
-	mux.Handle("POST /api/cameras/{id}/ptz/move", auth("operator", s.ptzMove))
-	mux.Handle("POST /api/cameras/{id}/ptz/stop", auth("operator", s.ptzStop))
-	mux.Handle("GET /api/cameras/{id}/ptz/presets", auth("viewer", s.ptzPresets))
-	mux.Handle("POST /api/cameras/{id}/ptz/goto", auth("operator", s.ptzGoto))
-	mux.Handle("POST /api/cameras/{id}/ptz/presets", auth("operator", s.ptzSavePreset))
-	mux.Handle("POST /api/cameras/{id}/ptz/action", auth("operator", s.ptzAction))
+	mux.Handle("POST /api/onvif/probe", auth("admin", s.onvifProbe))
+	mux.Handle("GET /api/cameras/{id}/ptz/check", auth("viewer", s.camPerm("ptz", s.ptzCheck)))
+	mux.Handle("POST /api/cameras/{id}/ptz/move", auth("viewer", s.camPerm("ptz", s.ptzMove)))
+	mux.Handle("POST /api/cameras/{id}/ptz/stop", auth("viewer", s.camPerm("ptz", s.ptzStop)))
+	mux.Handle("GET /api/cameras/{id}/ptz/presets", auth("viewer", s.camPerm("ptz", s.ptzPresets)))
+	mux.Handle("POST /api/cameras/{id}/ptz/goto", auth("viewer", s.camPerm("ptz", s.ptzGoto)))
+	mux.Handle("POST /api/cameras/{id}/ptz/presets", auth("viewer", s.camPerm("ptz", s.ptzSavePreset)))
+	mux.Handle("POST /api/cameras/{id}/ptz/action", auth("viewer", s.camPerm("ptz", s.ptzAction)))
+	mux.Handle("GET /api/events", auth("viewer", s.listEvents))
+	mux.Handle("POST /api/cameras/{id}/bookmarks", auth("viewer", s.camPerm("playback", s.addBookmark)))
+	mux.Handle("PUT /api/events/{id}", auth("viewer", s.updateEvent))
+	mux.Handle("GET /api/events/{id}/thumb", auth("viewer", s.eventThumb))
+	mux.Handle("DELETE /api/events/{id}", auth("viewer", s.deleteEvent))
+	mux.Handle("GET /api/cameras/{id}/export", auth("viewer", s.camPerm("export", s.export)))
+	mux.Handle("GET /api/audit", auth("admin", s.auditLog))
+	mux.Handle("GET /api/settings", auth("admin", s.getSettings))
+	mux.Handle("PUT /api/settings", auth("admin", s.putSettings))
+	mux.Handle("GET /api/notify", auth("admin", s.getNotify))
+	mux.Handle("PUT /api/notify", auth("admin", s.putNotify))
+	mux.Handle("POST /api/notify/test", auth("admin", s.testNotify))
+	mux.Handle("GET /api/users", auth("admin", s.listUsers))
+	mux.Handle("POST /api/users", auth("admin", s.createUser))
+	mux.Handle("PUT /api/users/{id}", auth("admin", s.updateUser))
+	mux.Handle("DELETE /api/users/{id}", auth("admin", s.deleteUser))
 	return logRequests(mux)
+}
+
+// camPerm checks that the signed-in user may use the camera in the path and, when need
+// is "playback" or "ptz", that they hold that permission.
+func (s *Server) camPerm(need string, h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, ok := pathID(r)
+		if !ok {
+			writeErr(w, 400, "bad id")
+			return
+		}
+		p := currentUser(r).Effective()
+		if !p.CanSee(id) {
+			writeErr(w, 404, "camera not found")
+			return
+		}
+		switch {
+		case need == "playback" && !p.Playback:
+			writeErr(w, 403, "your account is not allowed to view recordings")
+			return
+		case need == "ptz" && !p.PTZ:
+			writeErr(w, 403, "your account is not allowed to control PTZ")
+			return
+		case need == "export" && (!p.Playback || !p.Export):
+			writeErr(w, 403, "your account is not allowed to export video")
+			return
+		}
+		h(w, r)
+	}
 }
 
 // ---------- helpers ----------
@@ -111,7 +174,7 @@ func (s *Server) requireAuth(role string, h http.HandlerFunc) http.Handler {
 			tok = r.URL.Query().Get("token")
 		}
 		u, err := s.Store.SessionUser(tok)
-		if tok == "" || err != nil {
+		if tok == "" || err != nil || u.Disabled {
 			writeErr(w, http.StatusUnauthorized, "login required")
 			return
 		}
@@ -131,7 +194,7 @@ func currentUser(r *http.Request) store.User {
 // ---------- auth ----------
 
 func (s *Server) info(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]any{"name": "Ipvexa", "version": Version, "server_time": time.Now().UnixMilli()})
+	writeJSON(w, 200, map[string]any{"name": "IPvexa", "version": Version, "server_time": time.Now().UnixMilli()})
 }
 
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
@@ -153,20 +216,31 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 401, "wrong username or password")
 		return
 	}
+	if u.Disabled {
+		writeErr(w, 403, "this account is disabled; ask an administrator")
+		return
+	}
 	tok, err := s.Store.NewSession(u.ID, 30*24*time.Hour)
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return
 	}
+	s.Store.TouchLogin(u.ID)
+	s.Store.Audit(u.Username, "login", clientIP(r))
+	u.Perms = u.Effective()
 	writeJSON(w, 200, map[string]any{"token": tok, "user": u})
 }
 
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
-	s.Store.DeleteSession(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+	s.Store.DeleteSession(bearerToken(r))
 	w.WriteHeader(204)
 }
 
-func (s *Server) me(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, currentUser(r)) }
+func (s *Server) me(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
+	u.Perms = u.Effective()
+	writeJSON(w, 200, u)
+}
 
 // ---------- system ----------
 
@@ -180,12 +254,24 @@ func (s *Server) system(w http.ResponseWriter, r *http.Request) {
 		Oldest   int64 `json:"oldest"`
 	}
 	stats := []camStat{}
+	perms := currentUser(r).Effective()
 	for _, c := range cams {
+		if !perms.CanSee(c.ID) {
+			continue
+		}
 		n, b, o, _ := s.Store.RecordingStats(c.ID)
 		stats = append(stats, camStat{c.ID, n, b, o})
 	}
-	writeJSON(w, 200, map[string]any{"version": Version, "server_time": time.Now().UnixMilli(), "disk": du, "recordings": stats})
+	// Average disk write rate over the last 10 minutes of indexed footage.
+	const window = 10 * time.Minute
+	written, _ := s.Store.BytesWrittenSince(time.Now().Add(-window).UnixMilli())
+	writeJSON(w, 200, map[string]any{
+		"version": Version, "server_time": time.Now().UnixMilli(), "disk": du, "recordings": stats,
+		"write_bps": float64(written) / window.Seconds(), "uptime_s": int64(time.Since(startTime).Seconds()),
+	})
 }
+
+var startTime = time.Now()
 
 // ---------- cameras ----------
 
@@ -201,8 +287,12 @@ func (s *Server) listCameras(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	admin := currentUser(r).Role == "admin"
+	perms := currentUser(r).Effective()
 	out := make([]cameraView, 0, len(cams))
 	for _, c := range cams {
+		if !perms.CanSee(c.ID) {
+			continue
+		}
 		c.OnvifPass = ""
 		if !admin {
 			c.MainURL, c.SubURL = redact(c.MainURL), redact(c.SubURL)
@@ -212,14 +302,22 @@ func (s *Server) listCameras(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, out)
 }
 
-// redact hides camera passwords from non-admin users.
+// redact hides the login in a stream URL from non-admin users.
 func redact(u string) string {
-	at := strings.Index(u, "@")
 	sch := strings.Index(u, "://")
-	if at < 0 || sch < 0 || at < sch {
+	if sch < 0 {
 		return u
 	}
-	return u[:sch+3] + "***@" + u[at+1:]
+	rest := u[sch+3:]
+	authority := rest
+	if i := strings.IndexAny(rest, "/?#"); i >= 0 {
+		authority = rest[:i]
+	}
+	at := strings.LastIndex(authority, "@") // passwords may contain '@'
+	if at < 0 {
+		return u
+	}
+	return u[:sch+3] + "***@" + rest[at+1:]
 }
 
 func (s *Server) getCamera(w http.ResponseWriter, r *http.Request) {
@@ -254,8 +352,31 @@ func normalize(c *store.Camera) error {
 		c.Transport = "tcp"
 	}
 	// Recording is opt-in: a new camera only records when asked to.
-	if c.RecordMode != "continuous" {
+	if c.RecordMode != "continuous" && c.RecordMode != "motion" {
 		c.RecordMode = "off"
+	}
+	if c.RecordSchedule == nil {
+		c.RecordSchedule = []store.ScheduleRule{}
+	}
+	if len(c.RecordSchedule) > 20 {
+		return errors.New("a camera can have at most 20 schedule rules")
+	}
+	for _, r := range c.RecordSchedule {
+		if err := r.Validate(); err != nil {
+			return err
+		}
+	}
+	if c.UsesMode("motion") {
+		c.Motion = true // motion-only recording needs the detector
+	}
+	if c.MotionSensitivity <= 0 {
+		c.MotionSensitivity = 50
+	}
+	c.MotionSensitivity = min(c.MotionSensitivity, 100)
+	if strings.TrimSpace(c.MotionMask) != "" {
+		c.MotionMask = motion.ParseCells(c.MotionMask).String()
+	} else {
+		c.MotionMask = ""
 	}
 	if c.OnvifPort <= 0 || c.OnvifPort > 65535 {
 		c.OnvifPort = 80
@@ -285,6 +406,7 @@ func (s *Server) createCamera(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.Cams.Apply(c)
+	s.audit(r, "camera.create", c.Name)
 	c.OnvifPass = ""
 	writeJSON(w, 201, c)
 }
@@ -320,6 +442,7 @@ func (s *Server) updateCamera(w http.ResponseWriter, r *http.Request) {
 	}
 	s.ptz.invalidate(id)
 	go s.Cams.Apply(c)
+	s.audit(r, "camera.update", c.Name)
 	c.OnvifPass = ""
 	writeJSON(w, 200, c)
 }
@@ -330,12 +453,18 @@ func (s *Server) deleteCamera(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "bad id")
 		return
 	}
+	old, err := s.Store.Camera(id)
+	if err != nil {
+		writeErr(w, 404, "camera not found")
+		return
+	}
 	s.Cams.Stop(id)
 	s.ptz.invalidate(id)
 	if err := s.Store.DeleteCamera(id); err != nil {
 		writeErr(w, 500, err.Error())
 		return
 	}
+	s.audit(r, "camera.delete", old.Name)
 	w.WriteHeader(204)
 }
 
@@ -391,20 +520,42 @@ func (s *Server) live(w http.ResponseWriter, r *http.Request) {
 // snapshot decodes one frame from the live stream as JPEG.
 func (s *Server) snapshot(w http.ResponseWriter, r *http.Request) {
 	id, _ := pathID(r)
+	if t := queryInt(r, "t", 0); t > 0 {
+		s.recordedFrame(w, r, id, t)
+		return
+	}
 	stream := r.URL.Query().Get("stream")
 	if stream == "" {
 		stream = "sub"
 	}
-	hub := s.Cams.Hub(id, stream)
-	if hub == nil {
-		writeErr(w, 404, "camera not running")
-		return
-	}
 	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, s.FFmpeg, "-hide_banner", "-loglevel", "error", "-f", "mpegts", "-i", "pipe:0",
-		"-frames:v", "1", "-vf", "scale='min(640,iw)':-2", "-q:v", "4", "-f", "image2", "-c:v", "mjpeg", "pipe:1")
-	stdin, _ := cmd.StdinPipe()
+	img, err := s.LiveJPEG(ctx, id, stream)
+	if err != nil {
+		writeErr(w, 504, err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "image/jpeg")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Write(img)
+}
+
+// hubInput makes ffmpeg start quickly on a hub stream: the hub begins with a
+// keyframe, so half a second of probing is enough (the default waits ~5 s).
+var hubInput = [4]string{"-probesize", "1000000", "-analyzeduration", "500000"}
+
+// LiveJPEG grabs the next decodable frame of a camera's live stream as a JPEG.
+func (s *Server) LiveJPEG(ctx context.Context, id int64, stream string) ([]byte, error) {
+	hub := s.Cams.Hub(id, stream)
+	if hub == nil {
+		return nil, errors.New("camera not running")
+	}
+	cmd := exec.CommandContext(ctx, s.FFmpeg, "-hide_banner", "-loglevel", "error", hubInput[0], hubInput[1], hubInput[2], hubInput[3],
+		"-f", "mpegts", "-i", "pipe:0", "-frames:v", "1", "-vf", "scale='min(640,iw)':-2", "-q:v", "4", "-f", "image2", "-c:v", "mjpeg", "pipe:1")
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, err
+	}
 	sub := hub.Subscribe()
 	defer sub.Close()
 	go func() {
@@ -425,12 +576,9 @@ func (s *Server) snapshot(w http.ResponseWriter, r *http.Request) {
 	}()
 	img, err := cmd.Output()
 	if err != nil || len(img) == 0 {
-		writeErr(w, 504, "no frame available")
-		return
+		return nil, errors.New("no frame available")
 	}
-	w.Header().Set("Content-Type", "image/jpeg")
-	w.Header().Set("Cache-Control", "no-store")
-	w.Write(img)
+	return img, nil
 }
 
 // ---------- recordings ----------

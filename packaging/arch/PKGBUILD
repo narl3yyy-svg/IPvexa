@@ -1,0 +1,77 @@
+# Maintainer: IPvexa project <283486160+narl3yyy-svg@users.noreply.github.com>
+#
+# Builds both the server and the desktop app from the git repository:
+#   makepkg -si
+# Then: sudo systemctl enable --now ipvexa-server
+pkgbase=ipvexa-git
+pkgname=(ipvexa-server-git ipvexa-git)
+pkgver=0.3.0
+pkgrel=1
+pkgdesc="Self-hosted, offline video management system (NVR) with a native desktop app"
+arch=(x86_64 aarch64)
+url="https://github.com/narl3yyy-svg/IPvexa"
+license=(GPL-3.0-only)
+makedepends=(git go cmake ninja qt6-base qt6-declarative qt6-multimedia ffmpeg)
+source=("ipvexa::git+$url.git")
+sha256sums=(SKIP)
+
+pkgver() {
+  cd ipvexa
+  local v
+  v=$(sed -n 's/^const Version = "\(.*\)"$/\1/p' server/internal/api/api.go)
+  printf '%s.r%s.%s' "$v" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+}
+
+build() {
+  cd ipvexa/server
+  export CGO_ENABLED=0 GOFLAGS="-trimpath -mod=readonly -modcacherw"
+  go build -ldflags="-s -w" -o ipvexa-server ./cmd/ipvexa-server
+  cd ../client
+  cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -Wno-dev
+  cmake --build build
+}
+
+check() {
+  cd ipvexa/server
+  go test ./...
+  cd ../client
+  cmake --build build --target layout_tests
+  ./build/layout_tests
+}
+
+package_ipvexa-server-git() {
+  pkgdesc="IPvexa video management server (recording, motion detection, web view, phone alerts)"
+  depends=(ffmpeg)
+  provides=(ipvexa-server)
+  conflicts=(ipvexa-server)
+  install=ipvexa-server.install
+  cd ipvexa
+  install -Dm755 server/ipvexa-server "$pkgdir/usr/bin/ipvexa-server"
+  sed 's#/usr/local/bin/ipvexa-server#/usr/bin/ipvexa-server#' packaging/linux/ipvexa-server.service \
+    | install -Dm644 /dev/stdin "$pkgdir/usr/lib/systemd/system/ipvexa-server.service"
+  # System user and data directory, created by systemd at install time.
+  install -Dm644 /dev/stdin "$pkgdir/usr/lib/sysusers.d/ipvexa.conf" <<'EOF'
+u ipvexa - "IPvexa server" /var/lib/ipvexa
+m ipvexa video
+m ipvexa render
+EOF
+  install -Dm644 /dev/stdin "$pkgdir/usr/lib/tmpfiles.d/ipvexa.conf" <<'EOF'
+d /var/lib/ipvexa 0750 ipvexa ipvexa -
+EOF
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
+
+package_ipvexa-git() {
+  pkgdesc="IPvexa video management system - desktop app"
+  depends=(qt6-base qt6-declarative qt6-multimedia ffmpeg)
+  optdepends=('libva-intel-driver: Intel hardware decoding (older GPUs)'
+              'intel-media-driver: Intel hardware decoding'
+              'nvidia-utils: NVIDIA hardware decoding (NVDEC)')
+  provides=(ipvexa)
+  conflicts=(ipvexa)
+  cd ipvexa
+  install -Dm755 client/build/ipvexa "$pkgdir/usr/bin/ipvexa"
+  install -Dm644 packaging/linux/ipvexa.desktop "$pkgdir/usr/share/applications/ipvexa.desktop"
+  install -Dm644 packaging/linux/ipvexa.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/ipvexa.svg"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

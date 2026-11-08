@@ -22,6 +22,9 @@ class PlaybackClock : public QObject
     Q_PROPERTY(bool playing READ playing NOTIFY playingChanged)
     Q_PROPERTY(double speed READ speed WRITE setSpeed NOTIFY speedChanged)
     Q_PROPERTY(qint64 position READ position NOTIFY positionChanged)
+    // Reverse playback: the clock steps backwards and every tile shows the frame at
+    // each step (a "rewind scan", like dragging the timeline backwards).
+    Q_PROPERTY(bool reverse READ reverse WRITE setReverse NOTIFY reverseChanged)
 
 public:
     static PlaybackClock *instance();
@@ -37,6 +40,8 @@ public:
     // Bumped on every seek / mode change so decoders know to restart.
     int generation() const { return m_gen.load(); }
     bool fastForward() const { return speed() > 4.0; }
+    bool reverse() const { return m_reverse; }
+    void setReverse(bool r);
 
     Q_INVOKABLE void seek(qint64 ms);
     Q_INVOKABLE void goLive();
@@ -44,6 +49,9 @@ public:
     Q_INVOKABLE void pause();
     Q_INVOKABLE void togglePlay();
     Q_INVOKABLE void step(qint64 deltaMs);
+    // Step one frame while paused. Forward just advances the clock, so decoders show
+    // their next frame without restarting; backward seeks.
+    Q_INVOKABLE void stepFrame(int direction, double fps);
     Q_INVOKABLE qint64 now() const;
 
 signals:
@@ -52,6 +60,7 @@ signals:
     void speedChanged();
     void positionChanged();
     void seeked();
+    void reverseChanged();
 
 private:
     explicit PlaybackClock(QObject *parent = nullptr);
@@ -66,4 +75,6 @@ private:
     bool m_live = true;
     std::atomic<int> m_gen{0};
     QTimer m_tick;
+    QTimer m_reverseTimer;
+    bool m_reverse = false;
 };

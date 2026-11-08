@@ -23,6 +23,7 @@ class VideoPlayer : public QObject
     Q_PROPERTY(bool active READ active WRITE setActive NOTIFY activeChanged)
     Q_PROPERTY(QString state READ state NOTIFY stateChanged)
     Q_PROPERTY(QString info READ info NOTIFY infoChanged)
+    Q_PROPERTY(double fps READ fps NOTIFY infoChanged)
     Q_PROPERTY(qint64 frameTime READ frameTime NOTIFY frameTimeChanged)
 
 public:
@@ -41,12 +42,13 @@ public:
     void setActive(bool a);
     QString state() const { return m_state; }
     QString info() const { return m_info; }
+    double fps() const { return m_fps; }
     qint64 frameTime() const { return m_frameTime; }
 
     // Called from the decoder thread.
     struct Session;
     void postState(const QString &state);
-    void postInfo(const QString &info);
+    void postInfo(const QString &info, double fps = 0);
     void postFrame(const QVideoFrame &f, qint64 wallMs);
     bool shouldStop(int myGen) const { return m_stop.load() || m_gen.load() != myGen; }
 
@@ -73,6 +75,7 @@ private:
     bool m_active = true;
     QString m_state = "idle";
     QString m_info;
+    double m_fps = 0;
     qint64 m_frameTime = 0;
 
     std::thread m_thread;

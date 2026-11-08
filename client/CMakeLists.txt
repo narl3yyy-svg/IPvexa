@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(ipvexa VERSION 0.1.0 LANGUAGES CXX)
+project(ipvexa VERSION 0.3.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -42,6 +42,26 @@ qt_add_qml_module(ipvexa
         qml/TileIcon.qml
         qml/TileButton.qml
         qml/RightPanel.qml
+        qml/AppButton.qml
+        qml/Segmented.qml
+        qml/GridGlyph.qml
+        qml/ConfirmDialog.qml
+        qml/FieldLabel.qml
+        qml/PasswordDialog.qml
+        qml/UsersDialog.qml
+        qml/TabStrip.qml
+        qml/Logo.qml
+        qml/ToolSep.qml
+        qml/Stepper.qml
+        qml/CalendarPopup.qml
+        qml/BookmarkDialog.qml
+        qml/ExportDialog.qml
+        qml/MotionZoneEditor.qml
+        qml/NotificationsDialog.qml
+        qml/AuditDialog.qml
+        qml/VideoWall.qml
+        qml/ServerSettingsDialog.qml
+        qml/Cells.js
         qml/LayoutEngine.js
 )
 

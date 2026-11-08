@@ -23,6 +23,41 @@ PlaybackClock::PlaybackClock(QObject *parent) : QObject(parent)
     m_tick.setInterval(50);
     connect(&m_tick, &QTimer::timeout, this, &PlaybackClock::positionChanged);
     m_tick.start();
+    // Reverse: jump back speed × interval every interval; tiles show each position.
+    m_reverseTimer.setInterval(500);
+    connect(&m_reverseTimer, &QTimer::timeout, this, [this]() {
+        seek(position() - qint64(500 * speed()));
+    });
+}
+
+void PlaybackClock::setReverse(bool r)
+{
+    if (r == m_reverse)
+        return;
+    m_reverse = r;
+    if (r) {
+        pause(); // decoders hold the frame at the clock position
+        m_reverseTimer.start();
+    } else {
+        m_reverseTimer.stop();
+    }
+    emit reverseChanged();
+}
+
+void PlaybackClock::stepFrame(int direction, double fps)
+{
+    setReverse(false);
+    pause();
+    const qint64 frame = qint64(1000.0 / qBound(1.0, fps, 120.0));
+    if (direction < 0) {
+        seek(position() - frame);
+        return;
+    }
+    {
+        QMutexLocker l(&m_mu);
+        m_base += frame;
+    }
+    emit positionChanged();
 }
 
 qint64 PlaybackClock::now() const
@@ -104,6 +139,7 @@ void PlaybackClock::seek(qint64 ms)
 
 void PlaybackClock::goLive()
 {
+    setReverse(false);
     bool changed;
     {
         QMutexLocker l(&m_mu);
@@ -122,6 +158,7 @@ void PlaybackClock::goLive()
 
 void PlaybackClock::play()
 {
+    setReverse(false);
     {
         QMutexLocker l(&m_mu);
         if (m_playing)

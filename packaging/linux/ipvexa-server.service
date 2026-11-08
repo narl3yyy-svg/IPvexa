@@ -1,5 +1,5 @@
 [Unit]
-Description=Ipvexa video management server (recording + streaming)
+Description=IPvexa video management server (recording + streaming)
 After=network-online.target
 Wants=network-online.target
 

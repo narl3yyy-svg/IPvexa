@@ -91,10 +91,40 @@ function addCamera(l, cam, x, y) {
     if (existing >= 0) return moveItem(n, existing, x, y)
     var target = itemAt(n, x, y)
     if (target >= 0) {
-        n.items[target].cam = cam
+        // A different camera: drop the old tile's zoom and quality settings.
+        var t = n.items[target]
+        n.items[target] = { cam: cam, x: t.x, y: t.y, w: t.w, h: t.h }
         return n
     }
     n.items.push({ cam: cam, x: x, y: y, w: 1, h: 1 })
+    return n
+}
+
+// Add a second tile of item idx's camera on the first free cell (growing the grid
+// if needed), keeping its digital zoom: "open the zoomed area as its own tile".
+function duplicateItem(l, idx) {
+    var n = clone(l)
+    if (idx < 0 || idx >= n.items.length) return n
+    var src = n.items[idx]
+    var free = firstFree(n)
+    while (!free && (n.cols < MAX_GRID || n.rows < MAX_GRID)) {
+        n = grow(n)
+        free = firstFree(n)
+    }
+    if (!free) return n
+    var it = { cam: src.cam, x: free.x, y: free.y, w: 1, h: 1 }
+    if (src.z) it.z = clone(src.z)
+    if (src.q) it.q = src.q
+    n.items.push(it)
+    return n
+}
+
+// Digital zoom of item idx: z = { zoom, x, y } (centre as fractions), or null for none.
+function setZoom(l, idx, z) {
+    var n = clone(l)
+    if (idx < 0 || idx >= n.items.length) return n
+    if (z && z.zoom > 1.01) n.items[idx].z = { zoom: z.zoom, x: z.x, y: z.y }
+    else delete n.items[idx].z
     return n
 }
 
@@ -186,13 +216,24 @@ function presetSlots(p) {
 // Re-arrange the layout's cameras (in their current order) into a preset.
 function applyPreset(l, p) {
     var n = clone(l), ps = presetSlots(p)
-    var cams = n.items.slice().sort(function (a, b) { return a.y - b.y || a.x - b.x })
-                      .map(function (it) { return it.cam })
+    var old = n.items.slice().sort(function (a, b) { return a.y - b.y || a.x - b.x })
     n.cols = ps.cols; n.rows = ps.rows; n.items = []
-    for (var i = 0; i < cams.length && i < ps.slots.length; i++) {
+    for (var i = 0; i < old.length && i < ps.slots.length; i++) {
         var s = ps.slots[i]
-        n.items.push({ cam: cams[i], x: s.x, y: s.y, w: s.w, h: s.h })
+        var it = { cam: old[i].cam, x: s.x, y: s.y, w: s.w, h: s.h }
+        if (old[i].q) it.q = old[i].q
+        if (old[i].z) it.z = old[i].z
+        n.items.push(it)
     }
+    return n
+}
+
+// Per-tile stream quality: "" (follow the layout), "high" or "low".
+function setQuality(l, idx, q) {
+    var n = clone(l)
+    if (idx < 0 || idx >= n.items.length) return n
+    if (q === "high" || q === "low") n.items[idx].q = q
+    else delete n.items[idx].q
     return n
 }
 
@@ -205,7 +246,7 @@ function autoLayout(name, cams) {
     return applyPreset(l, p)
 }
 
-// Convert a layout saved by Ipvexa 0.1 ({preset, cams[]}).
+// Convert a layout saved by version 0.1 ({preset, cams[]}).
 function migrate(old) {
     if (old && old.items) return old
     var l = make(old && old.name ? old.name : "Layout", 2, 2)

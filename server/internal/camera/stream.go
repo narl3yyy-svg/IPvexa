@@ -48,6 +48,12 @@ type StreamStatus struct {
 	Recording  bool    `json:"recording"`
 }
 
+// Greedy up to the last '@' before the path: passwords may contain '@'.
+var loginRe = regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.-]*://)[^/\s'"]+@`)
+
+// HideLogins replaces "user:password@" in any URL in s with "***@".
+func HideLogins(s string) string { return loginRe.ReplaceAllString(s, "${1}***@") }
+
 var videoInfoRe = regexp.MustCompile(`Stream #0:\d+.*?: Video: (\w+)[^,]*,.*?(\d{2,5})x(\d{2,5})[^,]*(?:,.*?([\d.]+) fps)?`)
 
 func (s *Stream) Status() StreamStatus {
@@ -225,7 +231,8 @@ func (s *Stream) readLog(r io.Reader) {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 64*1024), 1024*1024)
 	for sc.Scan() {
-		line := sc.Text()
+		// ffmpeg puts the input URL in some errors; never keep camera passwords.
+		line := HideLogins(sc.Text())
 		if m := videoInfoRe.FindStringSubmatch(line); m != nil {
 			s.mu.Lock()
 			s.status.Codec = m[1]

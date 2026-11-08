@@ -1,6 +1,10 @@
 #include "ApiClient.h"
 
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
 #include <QJsonDocument>
+#include <QStandardPaths>
 #include <QJsonObject>
 #include <QNetworkReply>
 #include <QQmlEngine>
@@ -97,7 +101,7 @@ void ApiClient::login(const QString &server, const QString &user, const QString 
         s = "http://" + s;
     QUrl u(s);
     if (u.port() == -1)
-        u.setPort(7480); // default Ipvexa port when the user types just a host
+        u.setPort(7480); // default IPvexa port when the user types just a host
     u.setPath(QString());
     s = u.toString(QUrl::StripTrailingSlash);
     m_server = s;
@@ -108,8 +112,7 @@ void ApiClient::login(const QString &server, const QString &user, const QString 
     handleReply(reply, callback, [this, remember, s, user](const QVariant &data) {
         const auto m = data.toMap();
         m_token = m.value("token").toString();
-        m_user = m.value("user").toMap().value("username").toString();
-        m_role = m.value("user").toMap().value("role").toString();
+        setMe(m.value("user").toMap());
         QSettings st;
         st.setValue("session/server", s);
         st.setValue("session/user", user);
@@ -141,13 +144,28 @@ void ApiClient::restoreSession()
             emit sessionChanged();
             return;
         }
-        const auto m = parseBody(reply->readAll()).toMap();
-        m_user = m.value("username").toString();
-        m_role = m.value("role").toString();
+        setMe(parseBody(reply->readAll()).toMap());
         emit sessionChanged();
         refreshCameras();
         m_poll.start();
     });
+}
+
+void ApiClient::refreshMe()
+{
+    if (m_token.isEmpty())
+        return;
+    handleReply(m_net.get(request("/api/me")), QJSValue(), [this](const QVariant &data) {
+        setMe(data.toMap());
+        emit sessionChanged();
+    });
+}
+
+void ApiClient::setMe(const QVariantMap &me)
+{
+    m_me = me;
+    m_user = me.value("username").toString();
+    m_role = me.value("role").toString();
 }
 
 void ApiClient::logout()
@@ -155,6 +173,7 @@ void ApiClient::logout()
     if (!m_token.isEmpty())
         m_net.post(request("/api/logout"), QByteArray());
     m_token.clear();
+    m_me.clear();
     m_poll.stop();
     QSettings().remove("session/token");
     m_cameras.clear();
@@ -252,4 +271,80 @@ QString ApiClient::playbackUrl(int cameraId, qint64 t, bool keyframesOnly, bool 
     if (info)
         u += "&info=1";
     return u;
+}
+
+QString ApiClient::videosDir() const
+{
+    QString base = QStandardPaths::writableLocation(QStandardPaths::MoviesLocation);
+    if (base.isEmpty())
+        base = QDir::homePath();
+    return QDir(base).filePath("IPvexa");
+}
+
+QString ApiClient::frameUrl(int cameraId, qint64 t) const
+{
+    return QString("%1/api/cameras/%2/snapshot?t=%3&token=%4").arg(m_server).arg(cameraId).arg(t).arg(m_token);
+}
+
+QString ApiClient::eventThumbUrl(qint64 eventId) const
+{
+    return QString("%1/api/events/%2/thumb?token=%3").arg(m_server).arg(eventId).arg(m_token);
+}
+
+void ApiClient::download(const QString &path, const QString &filePath, const QJSValue &callback)
+{
+    auto finish = [this, callback](const QString &err, const QString &file) {
+        if (callback.isCallable()) {
+            QJSValue cb = callback;
+            if (QJSEngine *eng = qjsEngine(this))
+                cb.call({eng->toScriptValue(err.isEmpty() ? QVariant() : QVariant(err)), eng->toScriptValue(file)});
+        }
+    };
+    if (m_download) {
+        finish(tr("Another download is already running"), {});
+        return;
+    }
+    QDir().mkpath(QFileInfo(filePath).absolutePath());
+    auto *file = new QFile(filePath + ".part", this);
+    if (!file->open(QIODevice::WriteOnly)) {
+        finish(tr("Can't write %1").arg(filePath), {});
+        delete file;
+        return;
+    }
+    QNetworkRequest req = request(path);
+    req.setTransferTimeout(60000); // long clips: the server sends as it reads
+    m_download = m_net.get(req);
+    QNetworkReply *reply = m_download;
+    connect(reply, &QNetworkReply::readyRead, this, [reply, file]() { file->write(reply->readAll()); });
+    connect(reply, &QNetworkReply::downloadProgress, this, &ApiClient::downloadProgress);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, file, filePath, finish]() {
+        m_download = nullptr;
+        reply->deleteLater();
+        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        QByteArray rest = reply->readAll();
+        QString err;
+        if (reply->error() != QNetworkReply::NoError || status >= 400) {
+            err = QJsonDocument::fromJson(rest).object().value("error").toString();
+            if (err.isEmpty())
+                err = reply->error() == QNetworkReply::OperationCanceledError ? tr("Cancelled") : reply->errorString();
+        } else {
+            file->write(rest);
+        }
+        file->close();
+        if (err.isEmpty()) {
+            QFile::remove(filePath);
+            if (!file->rename(filePath))
+                err = tr("Can't save %1").arg(filePath);
+        } else {
+            file->remove();
+        }
+        file->deleteLater();
+        finish(err, err.isEmpty() ? filePath : QString());
+    });
+}
+
+void ApiClient::cancelDownload()
+{
+    if (m_download)
+        m_download->abort();
 }

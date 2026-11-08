@@ -76,5 +76,26 @@ check("autoLayout", autoLayout("a", [1, 2, 3, 4, 5]).cols === 3)
 // freeCells
 check("freeCells", freeCells(addCamera(make("f", 2, 2), 1)).length === 3)
 
+// per-tile quality survives moves and presets, and can be cleared
+var qq = addCamera(addCamera(make("q", 2, 2), 1), 2)
+qq = setQuality(qq, 0, "high")
+check("setQuality sets", qq.items[0].q === "high")
+qq = moveItem(qq, 0, 1, 1)
+check("quality survives move", at(qq, 1).q === "high")
+qq = applyPreset(qq, "3x3")
+check("quality survives preset", at(qq, 1).q === "high" && at(qq, 2).q === undefined)
+qq = setQuality(qq, qq.items.indexOf(at(qq, 1)), "")
+check("quality cleared", at(qq, 1).q === undefined)
+
+// digital zoom is saved per tile, copied by duplicateItem, dropped when the camera changes
+var zz = addCamera(make("z", 1, 1), 5)
+zz = setZoom(zz, 0, { zoom: 3, x: 0.2, y: 0.7 })
+check("setZoom", zz.items[0].z.zoom === 3)
+zz = duplicateItem(zz, 0)
+check("duplicate keeps zoom and grows grid", zz.items.length === 2 && zz.items[1].cam === 5 && zz.items[1].z.x === 0.2 && zz.cols * zz.rows >= 2)
+zz = addCamera(zz, 9, zz.items[1].x, zz.items[1].y)
+check("replacing a tile's camera clears its zoom", zz.items[1].cam === 9 && zz.items[1].z === undefined)
+check("setZoom(1) clears", setZoom(zz, 0, { zoom: 1, x: 0.5, y: 0.5 }).items[0].z === undefined)
+
 print("layout engine: " + passed + " passed, " + failures + " failed")
 failures

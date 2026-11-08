@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#101417">
+<title>IPvexa</title>
+<style>
+  :root {
+    --bg: #101417; --scene: #0a0d0f; --panel: #192024; --panel2: #212a2f; --raised: #2a343a;
+    --border: #263036; --text: #e3e8eb; --dim: #98a6ae; --faint: #5e6c74;
+    --accent: #2fa8e0; --online: #2fbf71; --live: #ff4757; --warn: #f5a524;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  button, input { font: inherit; color: inherit; }
+  button { background: var(--raised); border: 1px solid #36434a; border-radius: 8px; padding: 8px 14px; cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  button.ghost { background: transparent; border-color: transparent; color: var(--dim); }
+  button:disabled { opacity: .45; }
+  input { background: #0e1215; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; width: 100%; }
+  input:focus { outline: none; border-color: var(--accent); }
+  .hidden { display: none !important; }
+
+  header { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 10px; padding: 10px 14px;
+           padding-top: max(10px, env(safe-area-inset-top)); background: #12171a; border-bottom: 1px solid var(--border); }
+  .logo { width: 24px; height: 24px; border-radius: 6px; background: linear-gradient(#46b8ec, #1d74b8); position: relative; flex: none; }
+  .logo::after { content: ""; position: absolute; inset: 6px; border: 2px solid #fff; border-radius: 50%; }
+  .brand { font-weight: 700; font-size: 16px; letter-spacing: .3px; }
+  header .spacer { flex: 1; }
+  header .user { color: var(--dim); font-size: 13px; }
+
+  /* Login */
+  #login { min-height: 100vh; display: grid; place-items: center; padding: 20px; }
+  .card { width: 100%; max-width: 360px; background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 26px; }
+  .card h1 { margin: 0 0 2px; font-size: 22px; }
+  .card .sub { color: var(--dim); margin-bottom: 20px; font-size: 13px; }
+  .card label { display: block; color: var(--dim); font-size: 12px; margin: 12px 0 6px; }
+  .card button { width: 100%; margin-top: 18px; padding: 11px; }
+  .err { color: #ff8a93; font-size: 13px; margin-top: 10px; min-height: 1em; }
+
+  /* Grid */
+  #grid { display: grid; gap: 8px; padding: 10px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); }
+  .tile { position: relative; background: #000; border-radius: 10px; overflow: hidden; aspect-ratio: 16/9; cursor: pointer; border: 1px solid var(--border); }
+  .tile img { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .tile .name { position: absolute; left: 0; right: 0; top: 0; padding: 8px 10px 16px; font-weight: 600; font-size: 13px;
+                background: linear-gradient(#000c, #0000); display: flex; align-items: center; gap: 6px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); flex: none; }
+  .dot.on { background: var(--online); } .dot.off { background: var(--live); }
+  .badge { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 4px; background: #e5484dcc; }
+  .tile .msg { position: absolute; inset: 0; display: grid; place-items: center; color: var(--dim); font-size: 13px; }
+
+  /* Single camera */
+  #view { padding: 0 0 20px; }
+  .player { position: relative; background: #000; aspect-ratio: 16/9; max-height: 70vh; width: 100%; }
+  .player img, .player video { width: 100%; height: 100%; object-fit: contain; display: block; background: #000; }
+  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .seg button { border: 0; border-radius: 0; background: transparent; padding: 8px 12px; color: var(--dim); }
+  .seg button.on { background: #153a4d; color: var(--accent); }
+  .player .stamp { position: absolute; left: 10px; bottom: 10px; font: 600 12px ui-monospace, monospace; padding: 3px 8px; border-radius: 4px; background: #000a; }
+  .player .stamp.live { color: #ff6b77; }
+  .player .stamp.rec { color: #cfe3ff; background: #0f2a4dcc; }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px; align-items: center; border-bottom: 1px solid var(--border); }
+  .controls input[type=datetime-local] { width: auto; flex: 1 1 200px; padding: 8px 10px; color-scheme: dark; }
+  .live-btn { color: var(--live); border-color: var(--live); font-weight: 700; }
+  .live-btn.on { background: var(--live); color: #fff; }
+  h3 { margin: 14px 12px 8px; font-size: 13px; color: var(--dim); font-weight: 600; text-transform: uppercase; letter-spacing: .8px; }
+  .events { list-style: none; margin: 0; padding: 0 10px; display: grid; gap: 6px; }
+  .events li { display: flex; gap: 10px; align-items: center; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 6px; cursor: pointer; }
+  .events img { width: 96px; height: 54px; object-fit: cover; border-radius: 6px; background: #0b0e10; flex: none; }
+  .events .t { font-weight: 600; font-size: 13px; } .events .d { color: var(--dim); font-size: 12px; }
+  .events .k { font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 3px; margin-right: 6px; }
+  .k.motion { background: #e5484d; } .k.bookmark { background: var(--warn); color: #000; }
+  .empty { color: var(--faint); padding: 10px 14px; font-size: 13px; }
+</style>
+</head>
+<body>
+
+<section id="login" class="hidden">
+  <form class="card" id="loginForm">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:6px"><div class="logo" style="width:36px;height:36px;border-radius:9px"></div>
+      <div><h1>IPvexa</h1><div class="sub" style="margin:0">Video Management System</div></div></div>
+    <label for="u">Username</label><input id="u" autocomplete="username" autocapitalize="none" required>
+    <label for="p">Password</label><input id="p" type="password" autocomplete="current-password" required>
+    <button class="primary" type="submit" id="loginBtn">Sign in</button>
+    <div class="err" id="loginErr"></div>
+  </form>
+</section>
+
+<section id="app" class="hidden">
+  <header>
+    <button class="ghost hidden" id="back" aria-label="Back">‹ Back</button>
+    <div class="logo"></div><div class="brand" id="title">IPvexa</div>
+    <div class="spacer"></div>
+    <span class="user" id="who"></span>
+    <button class="ghost" id="logout">Sign out</button>
+  </header>
+  <main id="grid"></main>
+  <main id="view" class="hidden">
+    <div class="player"><img id="stream" alt=""><video id="video" class="hidden" muted playsinline autoplay></video><div class="stamp live" id="stamp">LIVE</div></div>
+    <div class="controls">
+      <button class="live-btn on" id="liveBtn">● LIVE</button>
+      <button id="back30" title="Back 30 seconds">−30 s</button>
+      <button id="fwd30" title="Forward 30 seconds">+30 s</button>
+      <input type="datetime-local" id="when" step="1" aria-label="Play from">
+      <button id="go">Play</button>
+      <span class="seg" title="Picture quality"><button id="qSD" class="on">SD</button><button id="qHD">HD</button></span>
+    </div>
+    <h3>Last 24 hours</h3>
+    <ul class="events" id="events"></ul>
+  </main>
+</section>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const S = { token: localStorage.getItem("ipvexa_token") || "", me: null, cams: [], cam: null, playFrom: 0, playStartedAt: 0, perms: {},
+            hd: localStorage.getItem("ipvexa_hd") === "1" };
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, { ...opts, headers: { "Content-Type": "application/json", ...(S.token ? { Authorization: "Bearer " + S.token } : {}) } });
+  const body = res.status === 204 ? null : await res.json().catch(() => null);
+  if (res.status === 401 && path !== "/api/login") { signedOut(); throw new Error("Please sign in again"); }
+  if (!res.ok) throw new Error((body && body.error) || res.statusText);
+  return body;
+}
+const withToken = (url) => url + (url.includes("?") ? "&" : "?") + "token=" + encodeURIComponent(S.token);
+const fmt = (ms, withDate) => new Date(ms).toLocaleString([], withDate ? { weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" } : { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+function signedOut() {
+  S.token = ""; localStorage.removeItem("ipvexa_token");
+  stopStreams();
+  $("app").classList.add("hidden"); $("login").classList.remove("hidden");
+}
+
+$("loginForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("loginErr").textContent = ""; $("loginBtn").disabled = true;
+  try {
+    const r = await api("/api/login", { method: "POST", body: JSON.stringify({ username: $("u").value, password: $("p").value }) });
+    S.token = r.token; localStorage.setItem("ipvexa_token", r.token);
+    $("p").value = "";
+    await start();
+  } catch (err) { $("loginErr").textContent = err.message; }
+  finally { $("loginBtn").disabled = false; }
+});
+$("logout").onclick = async () => { if (!confirm("Sign out of IPvexa?")) return; try { await api("/api/logout", { method: "POST" }); } catch (e) {} signedOut(); };
+
+async function start() {
+  S.me = await api("/api/me");
+  S.perms = S.me.permissions || {};
+  $("who").textContent = S.me.full_name || S.me.username;
+  $("login").classList.add("hidden"); $("app").classList.remove("hidden");
+  await loadCams();
+  route();
+}
+
+async function loadCams() { S.cams = await api("/api/cameras"); }
+
+// ---------- Grid: snapshots refreshed every few seconds (light on phones and VPNs) ----------
+let gridTimer = 0;
+function showGrid() {
+  stopStreams();
+  S.cam = null;
+  $("view").classList.add("hidden"); $("grid").classList.remove("hidden"); $("back").classList.add("hidden");
+  $("title").textContent = "IPvexa";
+  const g = $("grid");
+  if (!S.cams.length) { g.innerHTML = '<div class="empty">No cameras you can view.</div>'; return; }
+  g.innerHTML = S.cams.map((c) => {
+    const st = c.status && c.status.main ? c.status.main.state : "offline";
+    return `<div class="tile" data-id="${c.id}"><img alt="" data-id="${c.id}"><div class="msg">${c.enabled ? "Loading…" : "Disabled"}</div>
+      <div class="name"><span class="dot ${st === "online" ? "on" : "off"}"></span>${esc(c.name)}${c.status && c.status.motion ? '<span class="badge">MOTION</span>' : ""}</div></div>`;
+  }).join("");
+  g.querySelectorAll(".tile").forEach((t) => (t.onclick = () => { location.hash = "camera=" + t.dataset.id; }));
+  const refresh = async () => {
+    try { await loadCams(); } catch (e) { return; }
+    g.querySelectorAll("img[data-id]").forEach((img) => {
+      const c = S.cams.find((x) => x.id == img.dataset.id);
+      if (!c || !c.enabled) return;
+      const next = new Image();
+      next.onload = () => { img.src = next.src; img.nextElementSibling.classList.add("hidden"); };
+      next.onerror = () => { img.nextElementSibling.textContent = "No picture"; };
+      next.src = withToken(`/api/cameras/${c.id}/snapshot?r=${Date.now()}`);
+      const dot = img.parentElement.querySelector(".dot");
+      const st = c.status && c.status.main ? c.status.main.state : "offline";
+      dot.className = "dot " + (st === "online" ? "on" : "off");
+    });
+  };
+  refresh();
+  gridTimer = setInterval(refresh, 4000);
+}
+
+// ---------- Single camera: MJPEG live or playback ----------
+let clockTimer = 0;
+function stopStreams() {
+  clearInterval(gridTimer); gridTimer = 0;
+  clearInterval(clockTimer); clockTimer = 0;
+  const img = $("stream"); if (img) img.removeAttribute("src"); // closes the connection
+  const v = $("video"); if (v) { v.pause(); v.removeAttribute("src"); v.load(); }
+}
+
+// Can this browser play the camera's stream natively (full frame rate)? If not, MJPEG.
+function nativeVideo(stream) {
+  const st = S.cam && S.cam.status ? S.cam.status[stream] || S.cam.status.main : null;
+  const codec = st && st.codec;
+  const v = $("video");
+  if (codec === "h264") return v.canPlayType('video/mp4; codecs="avc1.640028"') !== "";
+  if (codec === "hevc") return v.canPlayType('video/mp4; codecs="hvc1.1.6.L150.B0"') !== "";
+  return false;
+}
+
+function showCamera(id, t) {
+  const c = S.cams.find((x) => x.id == id);
+  if (!c) { location.hash = ""; return; }
+  stopStreams();
+  S.cam = c;
+  $("qHD").classList.toggle("on", S.hd); $("qSD").classList.toggle("on", !S.hd);
+  $("grid").classList.add("hidden"); $("view").classList.remove("hidden"); $("back").classList.remove("hidden");
+  $("title").textContent = c.name;
+  const canPlay = S.me.role === "admin" || S.perms.playback;
+  ["back30", "fwd30", "when", "go"].forEach((x) => ($(x).disabled = !canPlay));
+  play(t || 0);
+  loadEvents();
+}
+
+function play(t, forceMjpeg) {
+  const img = $("stream"), video = $("video"), stamp = $("stamp");
+  stopStreams();
+  const recorded = t > 0 && t < Date.now() - 2000;
+  // Recordings are of the main stream; live uses the substream unless HD is on.
+  const stream = recorded || S.hd ? "main" : "sub";
+  const useVideo = !forceMjpeg && nativeVideo(stream);
+  const q = recorded ? `t=${Math.round(t)}` : `stream=${stream}`;
+  img.classList.toggle("hidden", useVideo); video.classList.toggle("hidden", !useVideo);
+  if (useVideo) {
+    video.src = withToken(`/api/cameras/${S.cam.id}/fmp4?${q}`);
+    video.play().catch(() => {});
+    video.onerror = () => play(t, true); // fall back to MJPEG
+  } else {
+    img.src = withToken(`/api/cameras/${S.cam.id}/mjpeg?${q}&w=${S.hd ? 1280 : 640}&fps=${S.hd ? 10 : 8}`);
+    img.onerror = () => { stamp.textContent = recorded ? "No recording at this time" : "Camera unavailable"; };
+  }
+  if (recorded) {
+    S.playFrom = t; S.playStartedAt = Date.now();
+    stamp.className = "stamp rec"; $("liveBtn").classList.remove("on");
+    const tick = () => { stamp.textContent = fmt(S.playFrom + (Date.now() - S.playStartedAt), true); };
+    tick(); clockTimer = setInterval(tick, 500);
+  } else {
+    S.playFrom = 0;
+    stamp.className = "stamp live"; stamp.textContent = "LIVE"; $("liveBtn").classList.add("on");
+    // Stay near the live edge: progressive video otherwise drifts behind.
+    if (useVideo) clockTimer = setInterval(() => {
+      const b = video.buffered;
+      if (b.length && b.end(b.length - 1) - video.currentTime > 2.5) video.currentTime = b.end(b.length - 1) - 0.4;
+    }, 1000);
+  }
+}
+function setHD(on) {
+  S.hd = on; localStorage.setItem("ipvexa_hd", on ? "1" : "0");
+  $("qHD").classList.toggle("on", on); $("qSD").classList.toggle("on", !on);
+  if (S.cam) play(S.playFrom ? position() : 0);
+}
+$("qSD").onclick = () => setHD(false);
+$("qHD").onclick = () => setHD(true);
+const position = () => (S.playFrom ? S.playFrom + (Date.now() - S.playStartedAt) : Date.now());
+$("liveBtn").onclick = () => play(0);
+$("back30").onclick = () => play(position() - 30000);
+$("fwd30").onclick = () => { const p = position() + 30000; play(p >= Date.now() - 2000 ? 0 : p); };
+$("go").onclick = () => { const v = $("when").value; if (v) play(new Date(v).getTime()); };
+
+async function loadEvents() {
+  const ul = $("events");
+  const canPlay = S.me.role === "admin" || S.perms.playback;
+  if (!canPlay) { ul.innerHTML = '<li class="empty">Your account can\'t view recordings.</li>'; return; }
+  try {
+    const list = await api(`/api/events?camera=${S.cam.id}&from=${Date.now() - 86400000}&newest=1&limit=60`);
+    if (!list.length) { ul.innerHTML = '<div class="empty">No motion or bookmarks in the last 24 hours.</div>'; return; }
+    ul.innerHTML = list.map((e) => `<li data-t="${e.start}">
+      <img loading="lazy" alt="" src="${withToken(`/api/events/${e.id}/thumb?w=192`)}">
+      <div><div class="t"><span class="k ${e.kind}">${e.kind === "motion" ? "MOTION" : "BOOKMARK"}</span>${fmt(e.start, true)}</div>
+      <div class="d">${e.kind === "bookmark" ? esc(e.note || "(no note)") : e.end ? Math.max(1, Math.round((e.end - e.start) / 1000)) + " s" : "now"}</div></div></li>`).join("");
+    ul.querySelectorAll("li[data-t]").forEach((li) => (li.onclick = () => { play(+li.dataset.t - 5000); window.scrollTo({ top: 0, behavior: "smooth" }); }));
+  } catch (err) { ul.innerHTML = `<div class="empty">${esc(err.message)}</div>`; }
+}
+
+// ---------- Routing: #camera=<id>&t=<ms> (used by phone notifications) ----------
+function route() {
+  const h = new URLSearchParams(location.hash.slice(1));
+  if (h.get("camera")) showCamera(+h.get("camera"), +(h.get("t") || 0));
+  else showGrid();
+}
+window.addEventListener("hashchange", () => { if (S.token && S.me) route(); });
+$("back").onclick = () => { location.hash = ""; };
+document.addEventListener("visibilitychange", () => {
+  // Don't stream in the background (saves battery and data).
+  if (document.hidden) stopStreams(); else if (S.me) route();
+});
+
+if (S.token) start().catch(() => signedOut()); else signedOut();
+</script>
+</body>
+</html>

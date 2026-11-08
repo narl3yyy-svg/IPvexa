@@ -1,0 +1,13 @@
+post_install() {
+  echo "Start the server with:  sudo systemctl enable --now ipvexa-server"
+  echo "First sign-in: user 'admin', password in /var/lib/ipvexa/initial-admin-password"
+  echo "               (sudo cat it, then change it in the app: user menu > Change password)"
+}
+
+post_upgrade() {
+  echo "Restart the server to finish the upgrade:  sudo systemctl restart ipvexa-server"
+}
+
+post_remove() {
+  echo "Recordings and settings were kept in /var/lib/ipvexa. Delete that folder yourself if you no longer need them."
+}

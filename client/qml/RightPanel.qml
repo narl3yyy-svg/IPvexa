@@ -3,7 +3,8 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import Ipvexa
 
-// Right panel (Nx-style): Notifications (camera events as they happen) and Health.
+// Right panel (Nx-style): Notifications (camera status changes as they happen),
+// Events (motion and bookmarks from the server, with thumbnails) and Health.
 Rectangle {
     id: root
     color: Theme.panel
@@ -13,6 +14,22 @@ Rectangle {
     property int unread: 0
 
     signal cameraFocusRequested(int cameraId, real time)
+
+    // ---- Events tab data ----
+    property var serverEvents: []
+    property string eventKind: ""   // "" | motion | bookmark
+    function loadEvents() {
+        if (!Api.canPlayback) { serverEvents = []; return }
+        var q = "/api/events?newest=1&limit=150&from=" + (Date.now() - 7 * 86400000) + (eventKind ? "&kind=" + eventKind : "")
+        Api.call("GET", q, null, function (err, list) { if (!err) root.serverEvents = list || [] })
+    }
+    onEventKindChanged: loadEvents()
+    Timer { interval: 10000; repeat: true; running: root.visible && root.tab === 1; triggeredOnStart: true; onTriggered: root.loadEvents() }
+    function fmtLen(ms) {
+        if (ms <= 0) return "now"
+        var s = Math.round(ms / 1000)
+        return s < 60 ? s + " s" : Math.floor(s / 60) + " min " + (s % 60) + " s"
+    }
 
     function push(ev) {
         var list = [ev].concat(events)
@@ -51,6 +68,10 @@ Rectangle {
         while (b >= 1024 && i < u.length - 1) { b /= 1024; i++ }
         return b.toFixed(b >= 100 || i === 0 ? 0 : 1) + " " + u[i]
     }
+    function fmtDuration(s) {
+        var d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60)
+        return d > 0 ? d + "d " + h + "h" : h > 0 ? h + "h " + m + "m" : m + "m"
+    }
 
     ColumnLayout {
         anchors.fill: parent
@@ -61,9 +82,9 @@ Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: 38
             Repeater {
-                model: [{ t: "Notifications", i: "bell" }, { t: "Health", i: "pulse" }]
+                model: [{ t: "Alerts", i: "bell" }, { t: "Events", i: "motion" }, { t: "Health", i: "pulse" }]
                 Rectangle {
-                    width: root.width / 2
+                    width: root.width / 3
                     height: 38
                     color: tma.containsMouse && root.tab !== index ? Theme.panelAlt : "transparent"
                     Row {
@@ -84,7 +105,7 @@ Rectangle {
                 }
             }
         }
-        Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
+        Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: Theme.border }
 
         // ---- Notifications ----
         ListView {
@@ -147,14 +168,135 @@ Rectangle {
                 TileIcon { anchors.horizontalCenter: parent.horizontalCenter; kind: "bell"; width: 30; height: 30; color: Theme.textFaint }
                 Text { anchors.horizontalCenter: parent.horizontalCenter; text: "No notifications"; color: Theme.textDim; font.pixelSize: 13 }
                 Text { anchors.horizontalCenter: parent.horizontalCenter; width: root.width - 40; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap
-                       text: "Camera offline / online and recording changes appear here. Motion and AI events arrive in a later phase."
+                       text: "Cameras going offline or coming back, and recording starting or stopping, appear here while the app is open."
                        color: Theme.textFaint; font.pixelSize: 11 }
+            }
+        }
+
+        // ---- Events (server) ----
+        ColumnLayout {
+            visible: root.tab === 1
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            spacing: 0
+            Segmented {
+                Layout.margins: 8
+                Layout.alignment: Qt.AlignHCenter
+                value: root.eventKind === "" ? "all" : root.eventKind
+                options: [{ value: "all", label: "All" }, { value: "motion", label: "Motion" }, { value: "bookmark", label: "Bookmarks" }]
+                onPicked: (v) => root.eventKind = v === "all" ? "" : v
+            }
+            ListView {
+                id: evList
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+                spacing: 1
+                model: root.serverEvents
+                ScrollBar.vertical: ScrollBar {}
+                delegate: Rectangle {
+                    required property var modelData
+                    readonly property var cam: Theme.findCamera(Api.cameras, modelData.camera_id)
+                    readonly property bool isBm: modelData.kind === "bookmark"
+                    width: ListView.view.width
+                    height: 64
+                    color: evMa.containsMouse ? Theme.panelAlt : "transparent"
+                    Rectangle {
+                        id: thumbBox
+                        x: 8; anchors.verticalCenter: parent.verticalCenter
+                        width: 88; height: 50; radius: 4
+                        color: "#0b0e10"
+                        clip: true
+                        Image {
+                            id: thumb
+                            anchors.fill: parent
+                            fillMode: Image.PreserveAspectCrop
+                            asynchronous: true
+                            sourceSize.width: 176
+                            // Only request thumbnails for rows on screen.
+                            property int retry: 0
+                            source: evList.visible ? Api.eventThumbUrl(modelData.id) + "&w=176" + (retry > 0 ? "&r=" + retry : "") : ""
+                            // A brand-new event's snapshot may still be on its way: try again shortly.
+                            Timer {
+                                interval: 3000
+                                running: thumb.status === Image.Error && thumb.retry < 3 && Date.now() - modelData.start < 120000
+                                onTriggered: thumb.retry++
+                            }
+                        }
+                        TileIcon {
+                            anchors.centerIn: parent
+                            visible: thumb.status !== Image.Ready
+                            kind: isBm ? "bookmark" : "motion"
+                            width: 16; height: 16
+                            color: Theme.textFaint
+                        }
+                        Rectangle {
+                            anchors.left: parent.left; anchors.bottom: parent.bottom; anchors.margins: 3
+                            width: kindText.implicitWidth + 8; height: 14; radius: 3
+                            color: isBm ? "#c0f5a524" : "#c0e5484d"
+                            Text { id: kindText; anchors.centerIn: parent; text: isBm ? "BOOKMARK" : "MOTION"; color: "white"; font.pixelSize: 8; font.weight: Font.Bold }
+                        }
+                    }
+                    Column {
+                        anchors.left: thumbBox.right; anchors.leftMargin: 10
+                        anchors.right: parent.right; anchors.rightMargin: 10
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: 2
+                        Text { width: parent.width; text: cam ? cam.name : "Camera " + modelData.camera_id; color: Theme.text; font.pixelSize: 12; font.weight: Font.DemiBold; elide: Text.ElideRight }
+                        Text {
+                            width: parent.width
+                            text: new Date(modelData.start).toLocaleString(Qt.locale(), "ddd d MMM  HH:mm:ss")
+                            color: Theme.textDim; font.pixelSize: 11
+                        }
+                        Text {
+                            width: parent.width
+                            text: isBm ? (modelData.note || "(no note)") + (modelData.author ? "  ·  " + modelData.author : "")
+                                       : root.fmtLen(modelData.end > 0 ? modelData.end - modelData.start : 0)
+                            color: Theme.textFaint; font.pixelSize: 10
+                            elide: Text.ElideRight
+                        }
+                    }
+                    MouseArea {
+                        id: evMa
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        acceptedButtons: Qt.LeftButton | Qt.RightButton
+                        onClicked: (m) => {
+                            if (m.button === Qt.RightButton) { evMenu.popup(); return }
+                            root.cameraFocusRequested(modelData.camera_id, modelData.start + 8000)
+                        }
+                    }
+                    Menu {
+                        id: evMenu
+                        MenuItem { text: "Play from here"; onTriggered: root.cameraFocusRequested(modelData.camera_id, modelData.start + 8000) }
+                        MenuItem {
+                            text: "Delete bookmark"
+                            visible: isBm && (Api.isAdmin || modelData.author === Api.username)
+                            height: visible ? implicitHeight : 0
+                            onTriggered: Api.call("DELETE", "/api/events/" + modelData.id, null, function () { root.loadEvents() })
+                        }
+                    }
+                }
+                Column {
+                    anchors.centerIn: parent
+                    visible: evList.count === 0
+                    spacing: 8
+                    width: root.width - 40
+                    TileIcon { anchors.horizontalCenter: parent.horizontalCenter; kind: "motion"; width: 30; height: 30; color: Theme.textFaint }
+                    Text { anchors.horizontalCenter: parent.horizontalCenter; text: Api.canPlayback ? "No events this week" : "Your account can't view recordings"; color: Theme.textDim; font.pixelSize: 13 }
+                    Text {
+                        width: parent.width; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap
+                        visible: Api.canPlayback
+                        text: "Turn on motion detection in a camera's settings (Motion tab), or right-click the timeline to add a bookmark."
+                        color: Theme.textFaint; font.pixelSize: 11
+                    }
+                }
             }
         }
 
         // ---- Health ----
         Flickable {
-            visible: root.tab === 1
+            visible: root.tab === 2
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
@@ -185,6 +327,21 @@ Rectangle {
                                                            + " · " + root.fmtBytes(parent.d.free) + " free" : "—"
                         color: Theme.textDim; font.pixelSize: 11
                     }
+                    Text {
+                        visible: Api.system.write_bps !== undefined
+                        text: "Writing " + ((Api.system.write_bps || 0) * 8 / 1e6).toFixed(1) + " Mb/s  ·  "
+                              + root.fmtBytes((Api.system.write_bps || 0) * 86400) + " per day"
+                              + (Api.system.write_bps > 0 && parent.d && parent.d.free
+                                 ? "  ·  ~" + Math.floor(parent.d.free / (Api.system.write_bps * 86400)) + " days of space left" : "")
+                        color: Theme.textFaint; font.pixelSize: 10
+                        width: parent.width
+                        wrapMode: Text.Wrap
+                    }
+                    Text {
+                        visible: !!Api.system.uptime_s
+                        text: "Server " + (Api.system.version || "") + " · up " + root.fmtDuration(Api.system.uptime_s || 0)
+                        color: Theme.textFaint; font.pixelSize: 10
+                    }
                 }
                 Rectangle { width: healthCol.width - 24; height: 1; color: Theme.border }
                 Text { text: "CAMERAS"; color: Theme.textFaint; font.pixelSize: 10; font.weight: Font.Bold; font.letterSpacing: 1 }
@@ -207,7 +364,7 @@ Rectangle {
                             spacing: 3
                             RowLayout {
                                 width: parent.width
-                                Rectangle { width: 7; height: 7; radius: 3.5; color: Theme.stateColor(!modelData.enabled ? "disabled" : (m ? m.state : "offline")) }
+                                Rectangle { implicitWidth: 7; implicitHeight: 7; radius: 3.5; color: Theme.stateColor(!modelData.enabled ? "disabled" : (m ? m.state : "offline")) }
                                 Text { Layout.fillWidth: true; text: modelData.name; color: Theme.text; font.pixelSize: 12; font.weight: Font.DemiBold; elide: Text.ElideRight }
                                 Text { text: m ? m.state : "—"; color: Theme.textDim; font.pixelSize: 10 }
                             }

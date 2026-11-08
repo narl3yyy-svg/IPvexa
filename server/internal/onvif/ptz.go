@@ -1,5 +1,5 @@
-// Package onvif implements the small part of ONVIF that Ipvexa needs for PTZ:
-// service discovery, media profiles, continuous move, stop and presets.
+// Package onvif implements the small part of ONVIF that IPvexa needs: service
+// discovery, media profiles and stream addresses, and PTZ (continuous move, stop, presets).
 package onvif
 
 import (
@@ -36,13 +36,14 @@ type Client struct {
 	DeviceURL  string // e.g. http://192.168.1.64:80/onvif/device_service
 	User, Pass string
 
-	http *http.Client
-	mu   sync.Mutex
-	init bool
-	skew time.Duration // camera clock minus our clock, as the camera reports it
-	ptz  string
-	med  string
-	prof string
+	http       *http.Client
+	mu         sync.Mutex
+	init       bool          // PTZ setup done
+	discovered bool          // services and clock looked up
+	skew       time.Duration // camera clock minus our clock, as the camera reports it
+	ptz        string
+	med        string
+	prof       string
 
 	// Cameras disagree on WS-Security: some only accept a password digest, others
 	// only plain text, and some report a wrong clock but check against the real one.
@@ -210,6 +211,47 @@ func (c *Client) setup(ctx context.Context) error {
 	if c.init {
 		return nil
 	}
+	c.discover(ctx)
+	s, err := c.call(ctx, c.med, `<trt:GetProfiles/>`, true)
+	if err != nil {
+		return err
+	}
+	m := profileRe.FindStringSubmatch(s)
+	if m == nil {
+		return errors.New("camera returned no ONVIF media profiles")
+	}
+	c.prof = m[1]
+
+	// Some firmware (e.g. OpenIPC builds) serves PTZ without listing it: try the usual address.
+	if c.ptz == "" {
+		guess := c.siblingURL("ptz_service")
+		// Any real SOAP answer (even "GetNodes is not supported") means a PTZ service is there.
+		_, err := c.call(ctx, guess, `<tptz:GetNodes/>`, true)
+		switch err {
+		case nil:
+			c.ptz = guess
+		case errAuth:
+			return err
+		case errNotFound:
+		default:
+			if !strings.HasPrefix(err.Error(), "camera did not answer") {
+				c.ptz = guess
+			}
+		}
+	}
+	if c.ptz == "" {
+		return ErrNoPTZ
+	}
+	c.init = true
+	return nil
+}
+
+// discover reads the camera's clock and finds its media and PTZ service addresses.
+// Caller holds c.mu. Failures are not fatal: the usual addresses are assumed.
+func (c *Client) discover(ctx context.Context) {
+	if c.discovered {
+		return
+	}
 	// Note the camera's reported clock; used only if logins fail with our own clock.
 	if s, err := c.call(ctx, c.DeviceURL, `<tds:GetSystemDateAndTime/>`, false); err == nil {
 		if m := utcRe.FindStringSubmatch(s); m != nil {
@@ -250,38 +292,7 @@ func (c *Client) setup(ctx context.Context) error {
 	if c.med == "" {
 		c.med = c.siblingURL("media_service")
 	}
-	s, err := c.call(ctx, c.med, `<trt:GetProfiles/>`, true)
-	if err != nil {
-		return err
-	}
-	m := profileRe.FindStringSubmatch(s)
-	if m == nil {
-		return errors.New("camera returned no ONVIF media profiles")
-	}
-	c.prof = m[1]
-
-	// Some firmware (e.g. OpenIPC builds) serves PTZ without listing it: try the usual address.
-	if c.ptz == "" {
-		guess := c.siblingURL("ptz_service")
-		// Any real SOAP answer (even "GetNodes is not supported") means a PTZ service is there.
-		_, err := c.call(ctx, guess, `<tptz:GetNodes/>`, true)
-		switch err {
-		case nil:
-			c.ptz = guess
-		case errAuth:
-			return err
-		case errNotFound:
-		default:
-			if !strings.HasPrefix(err.Error(), "camera did not answer") {
-				c.ptz = guess
-			}
-		}
-	}
-	if c.ptz == "" {
-		return ErrNoPTZ
-	}
-	c.init = true
-	return nil
+	c.discovered = true
 }
 
 func (c *Client) ptzCall(ctx context.Context, body string) (string, error) {
