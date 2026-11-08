@@ -25,6 +25,9 @@ set_source_files_properties(qml/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 qt_add_qml_module(ipvexa
     URI Ipvexa
     VERSION 1.0
+    # The import scan links QML plugins into static Qt builds. Distribution Qt is
+    # shared and loads them at run time; skipping it also avoids a warning per plugin.
+    NO_IMPORT_SCAN
     QML_FILES
         qml/Main.qml
         qml/Theme.qml
