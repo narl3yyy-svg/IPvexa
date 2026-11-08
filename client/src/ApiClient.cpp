@@ -223,8 +223,13 @@ void ApiClient::call(const QString &method, const QString &path, const QVariant 
 {
     QNetworkRequest req = request(path);
     QByteArray data;
-    if (body.isValid() && !body.isNull())
-        data = QJsonDocument::fromVariant(body).toJson(QJsonDocument::Compact);
+    // Objects passed from QML arrive wrapped in a QJSValue; unwrap them to plain
+    // maps/lists first, or the JSON body comes out empty.
+    QVariant v = body;
+    if (v.metaType() == QMetaType::fromType<QJSValue>())
+        v = v.value<QJSValue>().toVariant();
+    if (v.isValid() && !v.isNull())
+        data = QJsonDocument::fromVariant(v).toJson(QJsonDocument::Compact);
     QNetworkReply *reply = m_net.sendCustomRequest(req, method.toUtf8(), data);
     handleReply(reply, callback);
 }
