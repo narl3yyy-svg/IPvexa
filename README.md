@@ -30,7 +30,8 @@ At the end it prints the first sign-in password and the address for browsers and
 | `./install.sh --client` | Desktop app only, to view a server on another machine |
 | `./install.sh --server` | Server only, for a headless machine |
 | `./install.sh --import-dev` | Also move a development setup (`~/.local/share/ipvexa`: cameras, users, recordings) into the installed server |
-| `./install.sh --uninstall` | Remove the programs (recordings and settings are kept) |
+| `./uninstall.sh` | Remove the programs; recordings, cameras and settings are kept for a reinstall |
+| `./uninstall.sh --purge` | Remove everything, including all recordings and settings (asks you to type DELETE) |
 
 **Starting the app:** open **IPvexa** from the app menu, or run `ipvexa`. The server starts by itself at boot.
 

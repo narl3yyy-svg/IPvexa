@@ -45,14 +45,7 @@ esac
 
 # ---------------------------------------------------------------- uninstall
 if [[ $UNINSTALL == 1 ]]; then
-  say "Removing IPvexa"
-  if [[ $FAMILY == debian ]]; then
-    sudo apt-get remove -y ipvexa ipvexa-server || true
-  else
-    sudo pacman -Rns --noconfirm ipvexa-git ipvexa-server-git || true
-  fi
-  echo "Recordings and settings were kept in /var/lib/ipvexa. Delete that folder yourself if you no longer need them."
-  exit 0
+  exec "$ROOT/uninstall.sh"
 fi
 
 # ---------------------------------------------------------------- build tools

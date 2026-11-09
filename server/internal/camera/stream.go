@@ -2,6 +2,7 @@ package camera
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -84,7 +85,8 @@ func (s *Stream) setState(state, errMsg string) {
 
 // Args builds the ffmpeg command line. Exported for tests and diagnostics.
 func (s *Stream) Args() []string {
-	a := []string{"-hide_banner", "-nostdin", "-loglevel", "info"}
+	// -nostats: no progress lines (they end in \r, not \n, and only add load on the log pipe).
+	a := []string{"-hide_banner", "-nostdin", "-nostats", "-loglevel", "info"}
 	demo := strings.HasPrefix(s.URL, "demo://")
 	switch {
 	case demo:
@@ -228,11 +230,18 @@ func (s *Stream) runOnce(ctx context.Context) error {
 }
 
 func (s *Stream) readLog(r io.Reader) {
+	// If ffmpeg's log pipe ever fills up, ffmpeg blocks and stops reading the camera,
+	// so keep draining it whatever happens to the line parsing.
+	defer io.Copy(io.Discard, r)
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 64*1024), 1024*1024)
+	sc.Split(scanLogLines)
 	for sc.Scan() {
 		// ffmpeg puts the input URL in some errors; never keep camera passwords.
 		line := HideLogins(sc.Text())
+		if line == "" {
+			continue
+		}
 		if m := videoInfoRe.FindStringSubmatch(line); m != nil {
 			s.mu.Lock()
 			s.status.Codec = m[1]
@@ -250,4 +259,18 @@ func (s *Stream) readLog(r io.Reader) {
 		}
 		s.mu.Unlock()
 	}
+}
+
+// scanLogLines splits ffmpeg's log on \n and on \r (ffmpeg uses \r for lines it rewrites).
+func scanLogLines(data []byte, atEOF bool) (advance int, token []byte, err error) {
+	if atEOF && len(data) == 0 {
+		return 0, nil, nil
+	}
+	if i := bytes.IndexAny(data, "\r\n"); i >= 0 {
+		return i + 1, data[:i], nil
+	}
+	if atEOF {
+		return len(data), data, nil
+	}
+	return 0, nil, nil
 }
