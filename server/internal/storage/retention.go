@@ -15,8 +15,9 @@ import (
 
 type Retention struct {
 	Store      *store.Store
-	RecRoot    string
-	MinFreePct float64 // default minimum free disk space (percent); the app's setting overrides it
+	RecRoot    string        // original recordings folder (relative segment paths)
+	Root       func() string // folder new recordings go to (disk-space check); nil = RecRoot
+	MinFreePct float64       // default minimum free disk space (percent); the app's setting overrides it
 	Interval   time.Duration
 	ThumbDir   string // event thumbnails, in one folder per day
 }
@@ -57,12 +58,13 @@ func (r *Retention) Sweep() {
 		}
 	}
 
+	settings := r.Store.Server(r.MinFreePct)
+	pad := time.Duration(settings.MotionPadSec) * time.Second
 	for _, c := range cams {
 		if c.UsesMode("motion") {
-			r.sweepMotionOnly(c, now)
+			r.sweepMotionOnly(c, now, pad)
 		}
 	}
-	settings := r.Store.Server(r.MinFreePct)
 	// Motion events are kept for EventDays, bookmarks forever; the audit log for a year.
 	eventDays := time.Duration(settings.EventDays) * 24 * time.Hour
 	r.Store.PurgeEvents(now.Add(-eventDays).UnixMilli())
@@ -88,7 +90,11 @@ func (r *Retention) Sweep() {
 
 	// Disk-space guard: delete oldest footage across all cameras until enough is free.
 	for i := 0; i < 1000; i++ {
-		free, err := FreePct(r.RecRoot)
+		root := r.RecRoot
+		if r.Root != nil {
+			root = r.Root()
+		}
+		free, err := FreePct(root)
 		if err != nil || free >= settings.MinFreePct {
 			return
 		}
@@ -101,18 +107,16 @@ func (r *Retention) Sweep() {
 	}
 }
 
-const (
-	motionPad   = 10 * time.Second // footage kept before and after each event
-	motionGrace = 2 * time.Minute  // leave recent footage alone (events may still be open)
-)
+// Leave recent footage alone: events may still be open.
+const motionGrace = 2 * time.Minute
 
 // sweepMotionOnly deletes the last day's footage recorded in motion-only mode
-// that has no motion event or bookmark within motionPad of it.
-func (r *Retention) sweepMotionOnly(cam store.Camera, now time.Time) {
+// that has no motion event or bookmark within keepPad of it.
+func (r *Retention) sweepMotionOnly(cam store.Camera, now time.Time, keepPad time.Duration) {
 	camID := cam.ID
-	to := now.Add(-motionGrace).UnixMilli()
+	to := now.Add(-max(motionGrace, keepPad+time.Minute)).UnixMilli()
 	from := now.Add(-24 * time.Hour).UnixMilli()
-	pad := motionPad.Milliseconds()
+	pad := keepPad.Milliseconds()
 	evs, err := r.Store.Events(store.EventQuery{Cameras: []int64{camID}, From: from - pad, To: to + pad})
 	if err != nil {
 		return
@@ -166,7 +170,7 @@ func (r *Retention) purgeThumbs(before time.Time) {
 
 func (r *Retention) delete(segs []store.Segment) {
 	for _, s := range segs {
-		p := filepath.Join(r.RecRoot, s.Path)
+		p := s.File(r.RecRoot)
 		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
 			slog.Error("delete segment", "path", p, "err", err)
 			continue

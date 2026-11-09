@@ -71,7 +71,7 @@ check("1+5 others 1x1", at(p, 2).w === 1 && at(p, 3).w === 1)
 var old = { name: "Default", preset: "2x2", aspect: "Fill", cams: [4, 3, 0, 0] }
 var mg = migrate(old)
 check("migrate keeps cams", mg.items.length === 2 && at(mg, 4).x === 0 && at(mg, 3).x === 1 && mg.aspect === "Fill")
-check("autoLayout", autoLayout("a", [1, 2, 3, 4, 5]).cols === 3)
+check("autoLayout fills the screen", autoLayout("a", [1, 2, 3, 4, 5]).items.length === 5 && freeCells(autoLayout("a", [1, 2, 3, 4, 5])).length === 0)
 
 // freeCells
 check("freeCells", freeCells(addCamera(make("f", 2, 2), 1)).length === 3)
@@ -96,6 +96,40 @@ check("duplicate keeps zoom and grows grid", zz.items.length === 2 && zz.items[1
 zz = addCamera(zz, 9, zz.items[1].x, zz.items[1].y)
 check("replacing a tile's camera clears its zoom", zz.items[1].cam === 9 && zz.items[1].z === undefined)
 check("setZoom(1) clears", setZoom(zz, 0, { zoom: 1, x: 0.5, y: 0.5 }).items[0].z === undefined)
+
+// fill the screen: no empty cells for any camera count, nothing overlaps
+for (var k = 1; k <= 24; k++) {
+    var cams = []
+    for (var c = 1; c <= k; c++) cams.push(c)
+    var f = autoLayout("f", cams)
+    var ok = f.items.length === k && freeCells(f).length === 0 && f.cols <= MAX_GRID && f.rows <= MAX_GRID
+    for (var a = 0; a < f.items.length && ok; a++)
+        for (var b = a + 1; b < f.items.length; b++) if (overlaps(f.items[a], f.items[b])) ok = false
+    check("fill screen with " + k + " cameras", ok)
+}
+var five = fillScreen(addCamera(addCamera(addCamera(addCamera(addCamera(make("5", 3, 3), 1), 2), 3), 4), 5))
+check("5 cameras: 2 on top, 3 below", five.rows === 2 && five.cols === 6 && at(five, 1).w === 3 && at(five, 3).w === 2 && five.aspect === "Fill")
+check("4 cameras stay a 2x2 grid", fillScreen(autoLayout("x", [1, 2, 3, 4])).cols === 2 && autoLayout("x", [1, 2, 3, 4]).aspect === "16:9")
+
+// column and row sizes
+var g = make("g", 3, 2)
+var e0 = edges(g, "cols")
+check("equal sizes by default", Math.abs(e0[1] - 1 / 3) < 1e-9 && e0[3] === 1)
+g = moveBorder(g, "cols", 1, 0.5)
+check("moveBorder widens column 0", Math.abs(sizes(g, "cols")[0] - 0.5) < 1e-3 && Math.abs(sizes(g, "cols")[2] - 1 / 3) < 1e-3)
+g = moveBorder(g, "cols", 1, 0.99)
+check("moveBorder keeps a minimum width", sizes(g, "cols")[1] >= MIN_SHARE / 3 - 1e-3)
+check("moveBorder ignores the outer edges", moveBorder(g, "cols", 0, 0.2) === g && moveBorder(g, "cols", 3, 0.2) === g)
+check("adding a column resets widths", setGrid(g, 4, 2).cw === undefined && setGrid(g, 3, 3).cw !== undefined)
+check("evenSizes", !hasCustomSizes(evenSizes(moveBorder(g, "rows", 1, 0.3))) && hasCustomSizes(g))
+
+// draggable borders skip tiles that span across them
+var bs = borderSegments(five, "cols")
+check("borders between tiles only", bs.length === 3 && bs[0].i === 2 && bs[0].from === 1 && bs[0].to === 2 && bs[1].i === 3 && bs[1].from === 0 && bs[1].to === 1)
+check("row border runs the full width", borderSegments(five, "rows").length === 1 && borderSegments(five, "rows")[0].to === 6)
+
+// maximize frames
+check("setFit fill", setFit(g, "fill").fit === "fill" && setFit(setFit(g, "fill"), "fit").fit === undefined)
 
 print("layout engine: " + passed + " passed, " + failures + " failed")
 failures

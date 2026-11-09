@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -27,7 +26,7 @@ import (
 	"ipvexa/internal/web"
 )
 
-const Version = "0.3.0"
+const Version = "0.4.0"
 
 type Server struct {
 	Store   *store.Store
@@ -245,7 +244,7 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 // ---------- system ----------
 
 func (s *Server) system(w http.ResponseWriter, r *http.Request) {
-	du, _ := storage.Usage(s.RecRoot)
+	du, _ := storage.Usage(s.Cams.Root())
 	cams, _ := s.Store.Cameras()
 	type camStat struct {
 		ID       int64 `json:"id"`
@@ -392,7 +391,7 @@ func normalize(c *store.Camera) error {
 }
 
 func (s *Server) createCamera(w http.ResponseWriter, r *http.Request) {
-	c := store.Camera{Enabled: true, RetentionDays: 30}
+	c := store.Camera{Enabled: true, RetentionDays: s.Store.Server(s.MinFreePct).RetentionDays}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 65536)).Decode(&c); err != nil {
 		writeErr(w, 400, "bad request")
 		return
@@ -645,9 +644,12 @@ func (s *Server) playback(w http.ResponseWriter, r *http.Request) {
 		if n := len(run); n > 0 && g.Start-run[n-1].end > gapTolerance {
 			break
 		}
-		run = append(run, part{filepath.Join(s.RecRoot, g.Path), g.Start, g.End})
+		run = append(run, part{g.File(s.RecRoot), g.Start, g.End})
 	}
-	if p, start, ok := s.Cams.OpenSegment(id, stream); ok {
+	// The low-quality recording's open segment is left out: its timestamps are only
+	// corrected once it is finished (see camera.Manager.finalize), so the minute
+	// being recorded plays from the main recording instead.
+	if p, start, ok := s.Cams.OpenSegment(id, stream); ok && stream == "main" {
 		if n := len(run); (n == 0 && start <= t+gapTolerance) || (n > 0 && start-run[n-1].end <= gapTolerance) {
 			run = append(run, part{p, start, 0})
 		} else if n == 0 && start > t {
@@ -692,11 +694,13 @@ func (s *Server) playback(w http.ResponseWriter, r *http.Request) {
 	args := []string{"-hide_banner", "-loglevel", "error", "-nostdin",
 		"-f", "concat", "-safe", "0", "-i", tmp.Name(),
 		"-map", "0:v:0", "-c:v", "copy"}
+	// No dump_extra here: recordings are MP4, and the MPEG-TS muxer converts them
+	// with h264/hevc_mp4toannexb, which already puts the parameter sets in front of
+	// every keyframe. dump_extra would add them in MP4 form before that conversion,
+	// which ffmpeg rejects as invalid data (HEVC recordings then don't play).
 	if r.URL.Query().Get("keyframes") == "1" {
 		// For fast-forward: send only keyframes so the client isn't decoding hundreds of fps.
-		args = append(args, "-bsf:v", "noise=drop=not(key),dump_extra=freq=keyframe")
-	} else {
-		args = append(args, "-bsf:v", "dump_extra=freq=keyframe")
+		args = append(args, "-bsf:v", "noise=drop=not(key)")
 	}
 	args = append(args, "-copyts", "-output_ts_offset", strconv.Itoa(tsOffset),
 		"-muxdelay", "0", "-muxpreload", "0", "-f", "mpegts", "pipe:1")

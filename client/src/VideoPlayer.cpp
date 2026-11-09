@@ -476,14 +476,33 @@ void decoderMain(VideoPlayer *p, Config cfg, int gen)
         }
 
         // Playback: find the recording run at the clock's position and play it.
+        // Small tiles ask for the recorded low-quality stream (much lighter to decode,
+        // so several tiles play back smoothly) and fall back to the main recording
+        // when there is none at this time.
         const int cgen = clock->generation();
         Interrupt intr{p, gen, cgen};
         qint64 target = clock->position();
         p->postState("loading");
+        auto infoUrl = [&](const QString &stream) {
+            return QString("%1/api/cameras/%2/playback?t=%3&info=1&stream=%4&token=%5")
+                .arg(cfg.server).arg(cfg.cameraId).arg(target).arg(stream, cfg.token);
+        };
         PlayInfo info;
-        const QString infoUrl = QString("%1/api/cameras/%2/playback?t=%3&info=1&token=%4")
-                                    .arg(cfg.server).arg(cfg.cameraId).arg(target).arg(cfg.token);
-        if (!fetchPlayInfo(infoUrl, &intr, &info)) {
+        QString recStream = "main";
+        bool found = false;
+        if (cfg.stream == "sub" && fetchPlayInfo(infoUrl("sub"), &intr, &info)) {
+            found = true;
+            recStream = "sub";
+        }
+        if (!found || info.start > target + 3000) {
+            PlayInfo mainInfo;
+            if (fetchPlayInfo(infoUrl("main"), &intr, &mainInfo) && (!found || mainInfo.start < info.start)) {
+                info = mainInfo;
+                recStream = "main";
+                found = true;
+            }
+        }
+        if (!found) {
             if (p->shouldStop(gen))
                 break;
             if (clock->generation() == cgen)
@@ -503,8 +522,8 @@ void decoderMain(VideoPlayer *p, Config cfg, int gen)
         if (clock->generation() != cgen || p->shouldStop(gen))
             continue;
         target = std::max(info.start, std::min(clock->position(), info.runEnd));
-        const QString url = QString("%1/api/cameras/%2/playback?t=%3&token=%4%5")
-                                .arg(cfg.server).arg(cfg.cameraId).arg(target).arg(cfg.token)
+        const QString url = QString("%1/api/cameras/%2/playback?t=%3&stream=%4&token=%5%6")
+                                .arg(cfg.server).arg(cfg.cameraId).arg(target).arg(recStream, cfg.token)
                                 .arg(clock->fastForward() ? "&keyframes=1" : "");
         info.start = target; // the server starts the stream exactly at the time we asked for
         SessionResult r = runSession(p, &intr, url, false, &info, allowHw);
@@ -552,8 +571,7 @@ void VideoPlayer::setStream(const QString &s)
         return;
     m_stream = s;
     emit streamChanged();
-    if (m_live)
-        restart();
+    restart(); // playback also switches between the recorded main and low-quality streams
 }
 
 void VideoPlayer::setLive(bool l)

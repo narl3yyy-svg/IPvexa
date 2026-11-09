@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -49,10 +50,19 @@ type Segment struct {
 	ID       int64  `json:"id"`
 	CameraID int64  `json:"camera_id"`
 	Stream   string `json:"stream"` // "main" or "sub"
-	Path     string `json:"-"`      // relative to the recordings root
+	Path     string `json:"-"`      // absolute, or relative to the original recordings root
 	Start    int64  `json:"start"`  // unix ms
 	End      int64  `json:"end"`    // unix ms
 	Size     int64  `json:"size"`
+}
+
+// File is the segment's file on disk. Segments recorded before the recordings
+// folder was moved are stored relative to the original root.
+func (g Segment) File(originalRoot string) string {
+	if filepath.IsAbs(g.Path) {
+		return g.Path
+	}
+	return filepath.Join(originalRoot, g.Path)
 }
 
 type User struct {
@@ -270,6 +280,12 @@ func (s *Store) Cameras() ([]Camera, error) {
 		out = append(out, c)
 	}
 	return out, rows.Err()
+}
+
+// SetRetentionAll sets how long every camera keeps footage.
+func (s *Store) SetRetentionAll(days int) error {
+	_, err := s.db.Exec(`UPDATE cameras SET retention_days=?`, days)
+	return err
 }
 
 func (s *Store) Camera(id int64) (Camera, error) {

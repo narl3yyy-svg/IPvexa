@@ -19,6 +19,7 @@ AppDialog {
     property bool ptzTesting: false
     property bool probing: false
     property var probe: null          // last ONVIF stream detection result
+    property int motionPad: 10        // seconds kept around motion (server setting)
     property var schedule: []         // recording schedule rules (see server store.ScheduleRule)
     function changeRule(i, patch) {
         var l = schedule.slice()
@@ -131,6 +132,13 @@ AppDialog {
         ptzProto.currentIndex = cam && cam.ptz_protocol === "onvif" ? 1 : cam && cam.ptz_protocol === "ptzd" ? 2 : 0
         ptzResult = ""
         retention.value = cam ? cam.retention_days : 30
+        recSub.checked = cam ? !!cam.record_sub : true
+        // Server-wide defaults: retention for new cameras, motion recording buffer.
+        Api.call("GET", "/api/settings", null, function (err, d) {
+            if (err || !d) return
+            root.motionPad = d.motion_pad_sec || 10
+            if (!cam) retention.value = d.retention_days || 30
+        })
         tcp.currentIndex = cam && cam.transport === "udp" ? 1 : 0
         enabled_.checked = cam ? cam.enabled : true
         // Pre-fill the IP from an existing URL so templates can be reused.
@@ -153,7 +161,7 @@ AppDialog {
             motion_sensitivity: Math.round(sensitivity.value),
             motion_mask: zones.mask,
             record_schedule: schedule,
-            record_sub: false,
+            record_sub: recSub.checked && subUrl.text.trim() !== "",
             retention_days: retention.value,
             enabled: enabled_.checked,
             ptz: ptz.checked,
@@ -484,7 +492,7 @@ AppDialog {
                 Text {
                     Layout.fillWidth: true
                     Layout.preferredWidth: 100
-                    text: "Paint the areas to ignore (red), such as trees, a busy road or the camera's clock. Drag to paint several cells."
+                    text: "Things that keep moving in place, like trees and flags in the wind, are learned and ignored automatically, and motion only counts when something moves across the picture. Paint areas to ignore completely (red), such as a busy road or the camera's clock."
                     color: Theme.textDim
                     wrapMode: Text.Wrap
                     font.pixelSize: 12
@@ -520,10 +528,25 @@ AppDialog {
                     visible: recMode.currentIndex === 2
                     Layout.fillWidth: true
                     Layout.preferredWidth: 100
-                    text: "Keeps 10 seconds before and after each motion event and anything you bookmark. The rest is removed after a couple of minutes. Uses the zones and sensitivity on the Motion tab."
+                    text: "Keeps " + root.motionPad + " seconds before and after each motion event (change this in Server settings) and anything you bookmark. The rest is removed after a couple of minutes. Uses the zones and sensitivity on the Motion tab."
                     color: Theme.textDim
                     wrapMode: Text.Wrap
                     font.pixelSize: 12
+                }
+                FieldLabel { text: "Low quality"; visible: subUrl.text.trim() !== "" }
+                ColumnLayout {
+                    visible: subUrl.text.trim() !== ""
+                    Layout.fillWidth: true
+                    spacing: 2
+                    Switch { id: recSub; text: "Also record the low-quality stream"; checked: true }
+                    Text {
+                        Layout.fillWidth: true
+                        Layout.preferredWidth: 100
+                        text: "Small tiles then play back recordings smoothly, several at a time. Uses roughly 10–20% more storage."
+                        color: Theme.textFaint
+                        wrapMode: Text.Wrap
+                        font.pixelSize: 11
+                    }
                 }
                 FieldLabel { text: "Keep footage" }
                 RowLayout {

@@ -57,9 +57,15 @@
 - **Web view:** full-quality video (fragmented MP4, no re-encoding) with MJPEG as the fallback, and an SD/HD switch.
 - **Fixes:** camera passwords no longer appear in error messages, `ffprobe` can't stall indexing, stricter URL redaction, and more tests (18 Go test functions across 7 packages, 28 layout-engine checks).
 
+### ✅ v0.4
+- **Layouts:** drag the borders between tiles to resize columns and rows; **Auto-arrange** fills the screen with any number of cameras (grids up to 12×12); **Maximize frames** (crop to fill) and stretch, Blue Iris style.
+- **Playback:** a clear LIVE / PLAYBACK / PAUSED badge with **Go live**, the date opens the calendar, **Sync** on/off (synchronised playback of the whole layout, or only the selected camera), and small tiles play the recorded low-quality stream, so several cameras play back smoothly.
+- **Recording settings:** recordings folder (switchable without a restart; older footage stays playable), default retention (optionally for all cameras), motion pre/post buffer, and recording the low-quality stream.
+- **Motion:** busy cells (trees, flags, water) are learned and ignored, and an event needs the moving area to travel or grow, so things moving in place don't trigger recordings.
+- **Tests:** 24 Go test functions across 7 packages, 63 layout-engine checks.
+
 ### Next
 - **AI object detection** (person/vehicle/animal) with ONNX Runtime + YOLO on the NVIDIA GPU (CUDA), with OpenVINO/CPU fallback. Best built and tuned on the production machine with the GTX 1080 Ti.
 - **Camera-side events:** the Dahua event stream and OpenIPC/Thingino motion hooks. These need the cameras' HTTP/ONVIF ports reachable from the server.
-- Multiple recording disks.
 - AppImage of the desktop app; then macOS (.dmg) and Windows (.exe installer).
 - iPhone alerts: iOS only delivers background notifications through Apple's servers. Fully offline iOS alerts need the app open, or a self-hosted relay.

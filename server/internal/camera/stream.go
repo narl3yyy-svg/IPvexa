@@ -26,6 +26,11 @@ type Stream struct {
 	URL       string
 	Transport string
 	RecordDir string // empty = don't record
+	// RecordAudio keeps the camera's audio in recordings. Off for substreams: their
+	// recordings are only for smooth playback in small tiles, and some cameras
+	// announce audio on the substream without ever sending it, which would stop
+	// ffmpeg from writing the recording at all.
+	RecordAudio bool
 	// OnDemand streams only connect to the camera while someone is watching
 	// (saves camera and Wi-Fi bandwidth for main streams that aren't recorded).
 	OnDemand bool
@@ -126,12 +131,17 @@ func (s *Stream) Args() []string {
 	// Output 2: recording segments. Audio (often G.711 on cameras) is converted to AAC
 	// so it fits in MP4; video is copied untouched.
 	if s.RecordDir != "" {
-		a = append(a, "-map", "0:v:0", "-map", "0:a:0?")
+		a = append(a, "-map", "0:v:0")
 		a = append(a, vcodec...)
-		a = append(a, "-c:a", "aac", "-b:a", "64k",
-			"-f", "segment", "-segment_time", "60", "-segment_atclocktime", "1",
+		if s.RecordAudio {
+			a = append(a, "-map", "0:a:0?", "-c:a", "aac", "-b:a", "64k")
+		}
+		a = append(a, "-f", "segment", "-segment_time", "60", "-segment_atclocktime", "1",
 			"-reset_timestamps", "1", "-strftime", "1", "-segment_format", "mp4",
-			"-segment_format_options", "movflags=+frag_keyframe+empty_moov+default_base_moof",
+			// flush_packets: write each fragment to disk at once. Low-bitrate streams would
+			// otherwise sit in ffmpeg's buffer for the whole minute, so the minute being
+			// recorded could not be played back yet.
+			"-segment_format_options", "movflags=+frag_keyframe+empty_moov+default_base_moof:flush_packets=1",
 			filepath.Join(s.RecordDir, "%s.mp4"))
 	}
 	return a

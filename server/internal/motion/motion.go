@@ -4,10 +4,17 @@
 // Cols×Rows grid; a cell "moves" when enough of its pixels changed since the last
 // frame. Cells can be masked out (trees, roads, timestamps). Results are reported
 // per frame as a Cells bitmask so events can be searched by area later.
+//
+// Two filters keep swaying trees, flags, water and rain from counting as motion:
+//   - Cells that move most of the time are learned as "busy" and ignored until they
+//     calm down (a tree in the wind is busy for minutes; a person passes in seconds).
+//   - An event only starts when the moving area travels across the picture or grows
+//     (something walking or driving through); a branch waving in place does neither.
 package motion
 
 import (
 	"encoding/hex"
+	"math"
 	"strings"
 )
 
@@ -71,13 +78,27 @@ func ParseCells(s string) Cells {
 type Detector struct {
 	Sensitivity int   // 1 (only big changes) … 100 (very sensitive); 0 means 50
 	Mask        Cells // cells to ignore
+	// KeepBusy turns off the busy-cell filter (every moving cell counts).
+	KeepBusy bool
 
-	prev []byte
+	prev    []byte
+	busy    [N]float32 // per cell: how much of the time it has been moving lately, 0…1
+	flagged [N]bool    // per cell: currently treated as busy
 }
+
+// Busy-cell filter. A cell's activity rises quickly (about 15 s at 5 frames/s) and
+// falls slowly (about 2 minutes), so a tree that sways on and off stays ignored.
+const (
+	busyRise  = 1.0 / 75
+	busyFall  = 1.0 / 600
+	busyLimit = 0.4  // ignore a cell moving in more than ~40% of recent frames
+	busyCalm  = 0.25 // and count it again once it has calmed down below this
+)
 
 // Result of one frame.
 type Result struct {
-	Cells Cells   // moving cells (mask applied)
+	Cells Cells   // moving cells (mask and busy cells removed)
+	Busy  Cells   // cells currently ignored because they move nearly all the time
 	Level float64 // fraction of unmasked cells moving, 0…1
 	// Lighting is true when most of the picture changed at once (day/night switch,
 	// auto-exposure, a light turned on). Such frames are not reported as motion.
@@ -111,6 +132,7 @@ func (d *Detector) Feed(frame []byte) Result {
 		return r
 	}
 	pixTh, cellTh := d.thresholds()
+	var raw Cells
 	unmasked := 0
 	for cy := 0; cy < Rows; cy++ {
 		for cx := 0; cx < Cols; cx++ {
@@ -133,7 +155,7 @@ func (d *Detector) Feed(frame []byte) Result {
 				}
 			}
 			if changed >= cellTh {
-				r.Cells.Set(i)
+				raw.Set(i)
 			}
 		}
 	}
@@ -141,11 +163,47 @@ func (d *Detector) Feed(frame []byte) Result {
 	if unmasked == 0 {
 		return Result{}
 	}
-	r.Level = float64(r.Cells.Count()) / float64(unmasked)
-	if r.Level > 0.65 {
-		return Result{Lighting: true}
+	if float64(raw.Count())/float64(unmasked) > 0.65 {
+		return Result{Lighting: true} // not learned as busy either
 	}
+	for i := 0; i < N; i++ {
+		if d.Mask.Has(i) {
+			continue
+		}
+		moving := raw.Has(i)
+		if moving {
+			d.busy[i] += (1 - d.busy[i]) * busyRise
+		} else {
+			d.busy[i] -= d.busy[i] * busyFall
+		}
+		// Hysteresis: once busy, a cell stays ignored until it is well below the limit.
+		d.flagged[i] = d.busy[i] >= busyLimit || (d.flagged[i] && d.busy[i] >= busyCalm)
+		isBusy := d.flagged[i] && !d.KeepBusy
+		if isBusy {
+			r.Busy.Set(i)
+		}
+		if moving && !isBusy {
+			r.Cells.Set(i)
+		}
+	}
+	r.Level = float64(r.Cells.Count()) / float64(unmasked)
 	return r
+}
+
+// centroid of a set of cells, in cell units.
+func (c Cells) centroid() (x, y float64, n int) {
+	for i := 0; i < N; i++ {
+		if c.Has(i) {
+			x += float64(i%Cols) + 0.5
+			y += float64(i/Cols) + 0.5
+			n++
+		}
+	}
+	if n > 0 {
+		x /= float64(n)
+		y /= float64(n)
+	}
+	return
 }
 
 // Event is one stretch of motion.
@@ -156,18 +214,40 @@ type Event struct {
 }
 
 // Tracker turns per-frame results into events: an event starts once MinFrames
-// frames with motion are seen within Window ms (so single-frame noise is ignored),
-// and ends after Quiet ms without motion.
+// frames with motion are seen within Window ms (so single-frame noise is ignored)
+// and the moving area has travelled or grown (so things moving in place, like
+// branches, are ignored). It ends after Quiet ms without motion.
 type Tracker struct {
-	MinFrames int   // default 2
-	Window    int64 // default 1000 ms
-	Quiet     int64 // default 4000 ms
+	MinFrames int     // default 2
+	Window    int64   // default 2500 ms
+	Quiet     int64   // default 4000 ms
+	Travel    float64 // cells the moving area must travel; default 1.5, negative = don't check
 
 	recent  []int64 // times of recent moving frames (before an event starts)
+	spots   []spot  // the moving area in those frames
 	pending Cells   // cells seen in those frames
 	peak    float64
 	last    int64
 	current *Event
+}
+
+type spot struct {
+	x, y float64
+	n    int
+}
+
+// Big moving areas (a car close to the camera) start an event without travelling.
+const bigLevel = 0.2
+
+// travelled reports whether the moving area went somewhere: from the first frame
+// to the latest, its centre moved at least dist cells, or it grew by 3 cells or
+// more (something coming closer). Comparing only the ends ignores back-and-forth.
+func travelled(spots []spot, dist float64) bool {
+	if len(spots) < 2 {
+		return false
+	}
+	a, b := spots[0], spots[len(spots)-1]
+	return math.Hypot(b.x-a.x, b.y-a.y) >= dist || b.n-a.n >= 3
 }
 
 // Update feeds one frame result at time t (unix ms). It returns a started event
@@ -178,7 +258,11 @@ func (tr *Tracker) Update(t int64, r Result) (started, ended *Event) {
 		minFrames = 2
 	}
 	if window <= 0 {
-		window = 1000
+		window = 2500
+	}
+	travel := tr.Travel
+	if travel == 0 {
+		travel = 1.5
 	}
 	if quiet <= 0 {
 		quiet = 4000
@@ -200,34 +284,38 @@ func (tr *Tracker) Update(t int64, r Result) (started, ended *Event) {
 		return nil, nil
 	}
 	// Not in an event: keep the moving frames of the last window.
-	keep := tr.recent[:0]
-	for _, ts := range tr.recent {
-		if t-ts < window {
-			keep = append(keep, ts)
-		}
+	drop := 0
+	for drop < len(tr.recent) && t-tr.recent[drop] >= window {
+		drop++
 	}
-	tr.recent = keep
+	tr.recent, tr.spots = tr.recent[drop:], tr.spots[drop:]
 	if len(tr.recent) == 0 {
+		tr.recent, tr.spots = tr.recent[:0], tr.spots[:0]
 		tr.pending, tr.peak = Cells{}, 0
 	}
 	if !moving {
 		return nil, nil
 	}
+	x, y, n := r.Cells.centroid()
 	tr.recent = append(tr.recent, t)
+	tr.spots = append(tr.spots, spot{x, y, n})
 	tr.pending = tr.pending.Or(r.Cells)
 	tr.peak = max(tr.peak, r.Level)
 	if len(tr.recent) < minFrames {
 		return nil, nil
 	}
+	if travel > 0 && tr.peak < bigLevel && !travelled(tr.spots, travel) {
+		return nil, nil
+	}
 	tr.current = &Event{Start: tr.recent[0], Cells: tr.pending, Peak: tr.peak}
-	tr.recent, tr.pending, tr.peak = tr.recent[:0], Cells{}, 0
+	tr.recent, tr.spots, tr.pending, tr.peak = tr.recent[:0], tr.spots[:0], Cells{}, 0
 	e := *tr.current
 	return &e, nil
 }
 
 // Flush ends an ongoing event (e.g. when the stream stops).
 func (tr *Tracker) Flush() *Event {
-	tr.recent, tr.pending, tr.peak = tr.recent[:0], Cells{}, 0
+	tr.recent, tr.spots, tr.pending, tr.peak = tr.recent[:0], tr.spots[:0], Cells{}, 0
 	if tr.current == nil {
 		return nil
 	}

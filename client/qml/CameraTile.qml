@@ -25,6 +25,11 @@ Rectangle {
     readonly property string quality: qualityOverride !== "" ? qualityOverride : sceneQuality
     readonly property bool hasSub: hasCam && !!cam.sub_url
     readonly property bool motionNow: hasCam && !!cam.status && !!cam.status.motion
+    // How the video fills the tile: fit (whole picture), fill (crop: "maximize frames"), stretch.
+    property string fitMode: "fit"
+    // Sync off: only the selected tile plays recordings; the others stay live.
+    property bool followsTimeline: true
+    readonly property bool isLive: Clock.live || !followsTimeline
 
     // Digital zoom: 1 = whole picture. (zx, zy) is the centre of the view, as a
     // fraction of the picture.
@@ -65,6 +70,7 @@ Rectangle {
     signal areaChosen(string cells)
     signal zoomCommitted(var z)
     signal zoomTileRequested()
+    signal fitPicked(string fit)
     signal areaSearchRequested()
     signal cameraDropped(int cameraId)
     signal tileDropped(int fromIndex)
@@ -107,7 +113,7 @@ Rectangle {
         videoSink: video.videoSink
         cameraId: root.hasCam ? root.cameraId : 0
         stream: root.streamChoice
-        live: Clock.live
+        live: root.isLive
         liveBufferMs: root.liveBufferMs
         active: root.visible && root.hasCam && root.cam.enabled
     }
@@ -124,7 +130,8 @@ Rectangle {
             height: viewport.height * root.zoom
             x: viewport.width / 2 - root.zx * width
             y: viewport.height / 2 - root.zy * height
-            fillMode: VideoOutput.PreserveAspectFit
+            fillMode: root.fitMode === "fill" ? VideoOutput.PreserveAspectCrop
+                    : root.fitMode === "stretch" ? VideoOutput.Stretch : VideoOutput.PreserveAspectFit
         }
         // Smart search area (cells) drawn over the picture.
         Repeater {
@@ -212,7 +219,7 @@ Rectangle {
                 style: Text.Outline; styleColor: "#80000000"
             }
             TileIcon {
-                visible: root.motionNow && Clock.live
+                visible: root.motionNow && root.isLive
                 anchors.verticalCenter: parent.verticalCenter
                 kind: "motion"; width: 13; height: 13
                 color: "#ff6b6b"
@@ -318,12 +325,12 @@ Rectangle {
         width: timeText.implicitWidth + 12
         height: 18
         radius: 3
-        color: Clock.live ? "#b0000000" : "#c00f2a4d"
+        color: root.isLive ? "#b0000000" : "#c00f2a4d"
         Text {
             id: timeText
             anchors.centerIn: parent
-            text: Clock.live ? "LIVE" : new Date(player.frameTime).toLocaleString(Qt.locale(), "yyyy-MM-dd  HH:mm:ss")
-            color: Clock.live ? "#ff6b77" : "#cfe3ff"
+            text: root.isLive ? "LIVE" : new Date(player.frameTime).toLocaleString(Qt.locale(), "yyyy-MM-dd  HH:mm:ss")
+            color: root.isLive ? "#ff6b77" : "#cfe3ff"
             font.pixelSize: 10
             font.family: Theme.mono
             font.weight: Font.Bold
@@ -332,7 +339,7 @@ Rectangle {
 
     // PTZ pad (toggle with the PTZ toolbar button).
     PtzControls {
-        visible: root.ptzMode && root.hasCam && !!root.cam.ptz && Api.canPtz && Clock.live && root.height > 200 && root.width > 220
+        visible: root.ptzMode && root.hasCam && !!root.cam.ptz && Api.canPtz && root.isLive && root.height > 200 && root.width > 220
         cameraId: root.cameraId
         anchors.right: parent.right
         anchors.bottom: parent.bottom
@@ -500,6 +507,23 @@ Rectangle {
         id: tileMenu
         MenuItem { text: root.maximized ? "Restore" : "Maximize"; onTriggered: root.maximizeToggled() }
         MenuItem { text: "Full screen"; onTriggered: root.fullscreenRequested() }
+        MenuSeparator {}
+        MenuItem {
+            text: "Maximize frames"
+            checkable: true
+            checked: root.fitMode === "fill"
+            onTriggered: root.fitPicked(root.fitMode === "fill" ? "fit" : "fill")
+            ToolTip.visible: hovered
+            ToolTip.delay: 700
+            ToolTip.text: "Fill every tile with video by trimming the edges (no black bars)"
+        }
+        MenuItem {
+            text: "Stretch video to tiles"
+            checkable: true
+            checked: root.fitMode === "stretch"
+            onTriggered: root.fitPicked(root.fitMode === "stretch" ? "fit" : "stretch")
+        }
+        MenuSeparator {}
         Menu {
             title: "Quality"
             enabled: root.hasSub

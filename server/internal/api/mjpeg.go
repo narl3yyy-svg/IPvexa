@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -147,7 +146,7 @@ func (s *Server) concatFrom(id int64, stream string, t int64) (string, int64, er
 		if n := len(run); n > 0 && g.Start-run[n-1].end > gapTolerance {
 			break
 		}
-		run = append(run, part{filepath.Join(s.RecRoot, g.Path), g.Start, g.End})
+		run = append(run, part{g.File(s.RecRoot), g.Start, g.End})
 	}
 	if p, start, ok := s.Cams.OpenSegment(id, stream); ok {
 		n := len(run)

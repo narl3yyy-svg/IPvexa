@@ -43,6 +43,12 @@ type ServerSettings struct {
 	MinFreePct   float64 `json:"min_free_pct"`   // keep this much of the recording disk free
 	MaxStorageGB float64 `json:"max_storage_gb"` // cap on all footage; 0 = no cap
 	EventDays    int     `json:"event_days"`     // keep motion events this long
+	// RecordPath is where new recordings go; empty = <data>/recordings.
+	RecordPath string `json:"record_path"`
+	// MotionPadSec is how much footage motion-only recording keeps before and after each event.
+	MotionPadSec int `json:"motion_pad_sec"`
+	// RetentionDays is how long new cameras keep footage by default.
+	RetentionDays int `json:"retention_days"`
 }
 
 // Server returns the server settings with defaults filled in.
@@ -54,6 +60,12 @@ func (s *Store) Server(defaultMinFree float64) ServerSettings {
 	}
 	if v.EventDays <= 0 {
 		v.EventDays = 90
+	}
+	if v.MotionPadSec <= 0 {
+		v.MotionPadSec = 10
+	}
+	if v.RetentionDays <= 0 {
+		v.RetentionDays = 30
 	}
 	return v
 }

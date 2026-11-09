@@ -16,12 +16,14 @@ Nice=-5
 IOSchedulingClass=best-effort
 IOSchedulingPriority=0
 
-# Hardening: the server only needs its data directory and the GPU for decoding.
+# Hardening: the server only needs its data directory, the recordings folder and the
+# GPU for decoding. Recordings may also go to a disk mounted under /mnt, /media, /srv
+# or /data (Server settings in the app); the folder must belong to user "ipvexa".
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
-ReadWritePaths=/var/lib/ipvexa
+ReadWritePaths=/var/lib/ipvexa -/mnt -/media -/srv -/data
 ProtectKernelTunables=yes
 ProtectControlGroups=yes
 RestrictSUIDSGID=yes

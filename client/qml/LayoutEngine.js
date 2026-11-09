@@ -4,9 +4,11 @@
 // be unit-tested without the UI. Every mutating function takes a layout and returns a
 // NEW layout (or the same one when the change isn't allowed).
 //
-// layout = { name, cols, rows, aspect: "16:9"|"4:3"|"Fill", items: [{cam, x, y, w, h}] }
+// layout = { name, cols, rows, aspect: "16:9"|"4:3"|"Fill", items: [{cam, x, y, w, h}],
+//            cw: [column widths], rh: [row heights]   (optional relative sizes; equal if absent)
+//            fit: "fit"|"fill"|"stretch" }             (how video fills its tile; "fit" if absent)
 
-var MAX_GRID = 8
+var MAX_GRID = 12
 
 function clone(o) { return JSON.parse(JSON.stringify(o)) }
 
@@ -188,6 +190,142 @@ function setGrid(l, cols, rows) {
     var n = clone(l), m = minGrid(l)
     n.cols = Math.max(m.cols, Math.min(MAX_GRID, cols))
     n.rows = Math.max(m.rows, Math.min(MAX_GRID, rows))
+    // Custom column/row sizes no longer match: go back to equal sizes.
+    if (n.cols !== l.cols) delete n.cw
+    if (n.rows !== l.rows) delete n.rh
+    return n
+}
+
+// Relative column widths ("cols") or row heights ("rows"), summing to 1.
+function sizes(l, axis) {
+    var count = axis === "cols" ? l.cols : l.rows
+    var w = axis === "cols" ? l.cw : l.rh
+    var out = [], sum = 0, i
+    for (i = 0; i < count; i++) {
+        var v = w && w.length === count && w[i] > 0 ? w[i] : 1
+        out.push(v); sum += v
+    }
+    for (i = 0; i < count; i++) out[i] /= sum
+    return out
+}
+
+// Start offsets of each column/row plus the end (count + 1 values, 0 … 1).
+function edges(l, axis) {
+    var s = sizes(l, axis), out = [0], acc = 0
+    for (var i = 0; i < s.length; i++) { acc += s[i]; out.push(acc) }
+    out[out.length - 1] = 1
+    return out
+}
+
+// Smallest share a column or row can be dragged down to (of an equal share).
+var MIN_SHARE = 0.25
+
+// Move the border between column/row i-1 and i to position pos (0 … 1).
+function moveBorder(l, axis, i, pos) {
+    var count = axis === "cols" ? l.cols : l.rows
+    if (i <= 0 || i >= count) return l
+    var s = sizes(l, axis), e = edges(l, axis)
+    var min = MIN_SHARE / count
+    var lo = e[i - 1] + min, hi = e[i + 1] - min
+    if (hi <= lo) return l
+    pos = Math.max(lo, Math.min(hi, pos))
+    s[i - 1] = pos - e[i - 1]
+    s[i] = e[i + 1] - pos
+    var n = clone(l)
+    var rounded = s.map(function (v) { return Math.round(v * 10000) / 10000 })
+    if (axis === "cols") n.cw = rounded; else n.rh = rounded
+    return n
+}
+
+// Equal column and row sizes again.
+function evenSizes(l) {
+    var n = clone(l)
+    delete n.cw
+    delete n.rh
+    return n
+}
+
+function hasCustomSizes(l) { return !!(l.cw || l.rh) }
+
+// Draggable borders: for each inner column (axis "cols") or row border, the runs
+// of cells along it where no tile spans across. [{ i, from, to }] in cells.
+function borderSegments(l, axis) {
+    var out = []
+    var count = axis === "cols" ? l.cols : l.rows, along = axis === "cols" ? l.rows : l.cols
+    for (var i = 1; i < count; i++) {
+        var from = -1
+        for (var j = 0; j <= along; j++) {
+            var open = false
+            if (j < along) {
+                var a = axis === "cols" ? itemAt(l, i - 1, j) : itemAt(l, j, i - 1)
+                var b = axis === "cols" ? itemAt(l, i, j) : itemAt(l, j, i)
+                open = a !== b || a < 0
+            }
+            if (open && from < 0) from = j
+            if (!open && from >= 0) { out.push({ i: i, from: from, to: j }); from = -1 }
+        }
+    }
+    return out
+}
+
+// How video fills each tile: "fit" (whole picture, black bars), "fill" (crop the
+// edges so the tile is filled: "maximize frames") or "stretch".
+function setFit(l, fit) {
+    var n = clone(l)
+    if (fit === "fill" || fit === "stretch") n.fit = fit
+    else delete n.fit
+    return n
+}
+
+function greatestCommonDivisor(a, b) { return b === 0 ? a : greatestCommonDivisor(b, a % b) }
+function leastCommonMultiple(a, b) { return a / greatestCommonDivisor(a, b) * b }
+
+// Rows of tiles that fill the whole screen with k cameras and no empty space:
+// e.g. 5 cameras = 2 on top and 3 below, on a 6-column grid (tiles 3 and 2 wide).
+function fillSlots(k) {
+    if (k <= 0) return { cols: 1, rows: 1, slots: [] }
+    var start = Math.max(1, Math.round(Math.sqrt(k)))
+    var tries = [start]
+    for (var d = 1; d <= k; d++) { tries.push(start + d); if (start - d >= 1) tries.push(start - d) }
+    for (var t = 0; t < tries.length; t++) {
+        var r = tries[t]
+        if (r > k || r > MAX_GRID) continue
+        var base = Math.floor(k / r), extra = k % r
+        var counts = []
+        for (var y = 0; y < r; y++) counts.push(base + (y >= r - extra ? 1 : 0)) // more tiles in the lower rows
+        var cols = 1
+        for (var j = 0; j < counts.length; j++) cols = leastCommonMultiple(cols, counts[j])
+        if (cols > MAX_GRID) continue
+        var slots = []
+        for (var yy = 0; yy < r; yy++) {
+            var w = cols / counts[yy]
+            for (var x = 0; x < counts[yy]; x++) slots.push({ x: x * w, y: yy, w: w, h: 1 })
+        }
+        return { cols: cols, rows: r, slots: slots }
+    }
+    return presetSlots("4x4")
+}
+
+// Re-arrange the layout's cameras (in their current order) to fill the screen.
+// Uneven rows need tiles of different widths, so the tiles then stretch to the
+// screen ("Fill"); cropping the video ("maximize frames") hides the black bars.
+function fillScreen(l) {
+    var n = clone(l)
+    var old = n.items.slice().sort(function (a, b) { return a.y - b.y || a.x - b.x })
+    var fs = fillSlots(old.length)
+    n.cols = fs.cols; n.rows = fs.rows; n.items = []
+    delete n.cw
+    delete n.rh
+    var uneven = false
+    for (var i = 0; i < old.length && i < fs.slots.length; i++) {
+        var s = fs.slots[i]
+        if (s.w !== 1) uneven = true
+        var it = { cam: old[i].cam, x: s.x, y: s.y, w: s.w, h: s.h }
+        if (old[i].q) it.q = old[i].q
+        if (old[i].z) it.z = old[i].z
+        n.items.push(it)
+    }
+    if (uneven) n.aspect = "Fill"
     return n
 }
 
@@ -237,13 +375,11 @@ function setQuality(l, idx, q) {
     return n
 }
 
-// A sensible first layout for a list of camera ids.
+// A sensible first layout for a list of camera ids: every camera, no empty tiles.
 function autoLayout(name, cams) {
-    var k = cams.length
-    var p = k <= 1 ? "1" : k <= 4 ? "2x2" : k <= 6 ? "1+5" : k <= 9 ? "3x3" : k <= 13 ? "1+12" : "4x4"
     var l = make(name, 2, 2)
     l.items = cams.map(function (c, i) { return { cam: c, x: i, y: 0, w: 1, h: 1 } })
-    return applyPreset(l, p)
+    return fillScreen(l)
 }
 
 // Convert a layout saved by version 0.1 ({preset, cams[]}).

@@ -88,6 +88,13 @@ func main() {
 	defer stop()
 
 	mgr := &camera.Manager{Store: db, RecRoot: *recDir, FFmpeg: *ffmpeg, FFprobe: *ffprobe}
+	if p := db.Server(*minFree).RecordPath; p != "" {
+		if err := camera.CheckRoot(p); err != nil {
+			slog.Error("recordings folder from the settings is not usable; recording to the default folder", "dir", p, "err", err)
+		} else {
+			mgr.ActiveRoot = p
+		}
+	}
 	notifier := notify.New(db)
 	thumbDir := filepath.Join(*dataDir, "thumbs")
 	apiServer := &api.Server{Store: db, Cams: mgr, RecRoot: *recDir, DataDir: *dataDir, FFmpeg: *ffmpeg, MinFreePct: *minFree,
@@ -108,7 +115,7 @@ func main() {
 	if err := mgr.Start(ctx); err != nil {
 		fatal("start cameras", "err", err)
 	}
-	ret := &storage.Retention{Store: db, RecRoot: *recDir, MinFreePct: *minFree, ThumbDir: thumbDir}
+	ret := &storage.Retention{Store: db, RecRoot: *recDir, Root: mgr.Root, MinFreePct: *minFree, ThumbDir: thumbDir}
 	go ret.Run(ctx)
 	go notifier.Watch(ctx, func() []notify.CameraState {
 		cams, _ := db.Cameras()
@@ -125,7 +132,7 @@ func main() {
 		}
 		return out
 	}, func() float64 {
-		free, err := storage.FreePct(*recDir)
+		free, err := storage.FreePct(mgr.Root())
 		if err != nil {
 			return 100
 		}
@@ -155,7 +162,7 @@ func main() {
 		defer cancel()
 		srv.Shutdown(sctx)
 	}()
-	slog.Info("IPvexa server started", "version", api.Version, "listen", *listen, "data", *dataDir, "recordings", *recDir)
+	slog.Info("IPvexa server started", "version", api.Version, "listen", *listen, "data", *dataDir, "recordings", mgr.Root())
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		fatal("http server", "err", err)
 	}

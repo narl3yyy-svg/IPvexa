@@ -223,7 +223,7 @@ func (s *Server) recordedFrame(w http.ResponseWriter, r *http.Request, id, t int
 	}
 	path, start := "", int64(0)
 	if seg != nil {
-		path, start = filepath.Join(s.RecRoot, seg.Path), seg.Start
+		path, start = seg.File(s.RecRoot), seg.Start
 	} else if p, st, ok := s.Cams.OpenSegment(id, "main"); ok && st <= t {
 		path, start = p, st
 	} else {
@@ -310,7 +310,7 @@ func (s *Server) export(w http.ResponseWriter, r *http.Request) {
 	}
 	var parts []part
 	for _, g := range segs {
-		parts = append(parts, part{filepath.Join(s.RecRoot, g.Path), g.Start, g.End})
+		parts = append(parts, part{g.File(s.RecRoot), g.Start, g.End})
 	}
 	if p, start, ok := s.Cams.OpenSegment(id, stream); ok && start < to {
 		parts = append(parts, part{p, start, time.Now().UnixMilli()})

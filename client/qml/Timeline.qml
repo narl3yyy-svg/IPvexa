@@ -4,7 +4,8 @@ import QtQuick.Layouts
 import Ipvexa
 
 // Playback controls + zoomable timeline showing recorded footage (green), motion (red)
-// and bookmarks (amber) for the selected camera.
+// and bookmarks (amber) for the selected camera. In sync mode every camera on the
+// layout plays the same moment; a thin strip shows when any of them recorded.
 // Wheel = zoom around the cursor, drag = pan, click = jump, right-click = bookmark / export.
 Rectangle {
     id: root
@@ -20,6 +21,10 @@ Rectangle {
     property var events: []          // motion + bookmarks in (and around) the view
     property string searchCells: ""  // smart search: only motion inside this area
     property real fps: 0              // frame rate of the selected tile (for frame stepping)
+    property bool sync: true          // all cameras on the layout follow the timeline
+    property var cameraIds: []        // cameras on the layout (for the sync strip)
+    property var allChunks: []        // footage of any camera on the layout (merged)
+    signal syncToggled()
     signal bookmarkRequested(real time)
     signal exportRequested(real from, real to)
     signal searchCleared()
@@ -42,6 +47,7 @@ Rectangle {
                 canvas.requestPaint()
             }
         })
+        fetchAll(from, to)
         // Skip motion when zoomed out too far to see it (keeps requests small).
         var q = "/api/events?camera=" + cam + "&from=" + from + "&to=" + to + "&limit=3000"
         if (span > 3 * 86400000) q += "&kind=bookmark"
@@ -54,6 +60,33 @@ Rectangle {
         })
     }
     onSearchCellsChanged: fetch()
+
+    // Footage of every camera on the layout, merged into one list of ranges.
+    property int allGen: 0
+    function fetchAll(from, to) {
+        var ids = sync ? cameraIds.filter(function (id, i, a) { return id > 0 && a.indexOf(id) === i }) : []
+        var gen = ++allGen
+        if (ids.length < 2) { allChunks = []; return }
+        var lists = [], left = ids.length
+        ids.forEach(function (id) {
+            Api.fetchTimeline(id, from, to, function (err, data) {
+                if (gen !== root.allGen) return
+                if (!err && data && data.chunks) lists.push(data.chunks)
+                if (--left > 0) return
+                var all = [].concat.apply([], lists).sort(function (a, b) { return a[0] - b[0] })
+                var merged = []
+                all.forEach(function (c) {
+                    var n = merged.length
+                    if (n > 0 && c[0] <= merged[n - 1][1] + 3000) merged[n - 1][1] = Math.max(merged[n - 1][1], c[1])
+                    else merged.push([c[0], c[1]])
+                })
+                root.allChunks = merged
+                canvas.requestPaint()
+            })
+        })
+    }
+    onSyncChanged: fetch()
+    onCameraIdsChanged: fetchDebounce.restart()
 
     // Jump to the previous / next event (motion or bookmark) from the playhead.
     function jumpEvent(dir) {
@@ -111,6 +144,14 @@ Rectangle {
         return d.toLocaleDateString(Qt.locale(), "ddd d MMM yyyy") + "  " + d.toLocaleTimeString(Qt.locale(), "HH:mm:ss")
     }
 
+    Rectangle {
+        visible: !Clock.live
+        width: parent.width
+        height: 2
+        color: "#1f6fd1"
+        z: 5
+    }
+
     RowLayout {
         anchors.fill: parent
         anchors.leftMargin: 8
@@ -146,6 +187,13 @@ Rectangle {
                     enabled: Api.canPlayback
                     active: Clock.reverse
                     onClicked: { root.follow = true; Clock.reverse = !Clock.reverse }
+                }
+                IconButton {
+                    text: "Sync"; size: 20
+                    active: root.sync
+                    tip: root.sync ? "Sync is on: every camera on the layout plays the same moment. Click to play back only the selected camera."
+                                   : "Sync is off: only the selected camera plays back, the others stay live. Click to sync all cameras."
+                    onClicked: root.syncToggled()
                 }
                 IconButton { text: "‹|"; size: 20; tip: "Previous frame (,)"; enabled: Api.canPlayback; onClicked: root.stepFrame(-1) }
                 IconButton { text: "|›"; size: 20; tip: "Next frame (.)"; enabled: Api.canPlayback && !Clock.live; onClicked: root.stepFrame(1) }
@@ -232,6 +280,15 @@ Rectangle {
                         ctx.fillText(txt, lx + 4, 1)
                     }
 
+                    // Sync: thin strip above the lane = footage on any camera of the layout
+                    if (root.sync && root.allChunks.length > 0) {
+                        ctx.fillStyle = "#5a8fd0"
+                        for (var ac = 0; ac < root.allChunks.length; ac++) {
+                            var aa = xAt(root.allChunks[ac][0]), ab = xAt(root.allChunks[ac][1])
+                            if (ab < 0 || aa > w) continue
+                            ctx.fillRect(Math.max(0, aa), laneTop - 4, Math.max(1.5, Math.min(w, ab) - Math.max(0, aa)), 2)
+                        }
+                    }
                     // Recorded footage lane
                     ctx.fillStyle = "#1b2028"
                     ctx.fillRect(0, laneTop, w, laneH)
@@ -408,10 +465,10 @@ Rectangle {
             }
         }
 
-        // ---------- Right: position + LIVE ----------
+        // ---------- Right: camera, date (opens the calendar), LIVE / PLAYBACK ----------
         ColumnLayout {
             spacing: 4
-            Layout.preferredWidth: 220
+            Layout.preferredWidth: 252
             Layout.fillWidth: false // nested layouts with fill-width children are greedy by default
             Layout.alignment: Qt.AlignVCenter
             RowLayout {
@@ -443,56 +500,108 @@ Rectangle {
                     horizontalAlignment: Text.AlignRight
                 }
             }
-            Text {
+            // Date and time of the playhead. Click to pick a day.
+            AbstractButton {
+                id: dateBtn
                 Layout.fillWidth: true
-                text: root.fmtPos(root.pos)
-                color: Clock.live ? Theme.text : "#9cc8ff"
-                font.pixelSize: 13
-                font.family: Theme.mono
-                horizontalAlignment: Text.AlignRight
+                implicitHeight: 24
+                hoverEnabled: true
+                onClicked: calendar.opened ? calendar.close() : calendar.open()
+                ToolTip.visible: hovered
+                ToolTip.delay: 600
+                ToolTip.text: "Go to a date"
+                background: Rectangle {
+                    radius: 4
+                    color: dateBtn.down || calendar.opened ? Theme.raised : dateBtn.hovered ? Theme.panelAlt : "transparent"
+                    border.color: dateBtn.hovered || calendar.opened ? Theme.borderStrong : "transparent"
+                }
+                contentItem: Item {
+                    Row {
+                        anchors.right: parent.right
+                        anchors.rightMargin: 6
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: 7
+                        TileIcon {
+                            anchors.verticalCenter: parent.verticalCenter
+                            kind: "calendar"; width: 12; height: 12
+                            color: dateBtn.hovered || calendar.opened ? Theme.accent : Theme.textDim
+                        }
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: root.fmtPos(root.pos)
+                            color: Clock.live ? Theme.text : "#9cc8ff"
+                            font.pixelSize: 13
+                            font.family: Theme.mono
+                        }
+                    }
+                }
+                CalendarPopup {
+                    id: calendar
+                    y: -height - 6
+                    x: dateBtn.width - width
+                    selected: new Date(root.pos)
+                    onPicked: (d) => {
+                        // Jump to the start of that day and show the whole day.
+                        root.follow = true
+                        Clock.seek(d.getTime())
+                        root.zoomTo(86400000, d.getTime(), 0)
+                    }
+                }
             }
             RowLayout {
-                Layout.alignment: Qt.AlignRight
+                Layout.fillWidth: true
                 spacing: 4
                 IconButton { text: "1h"; size: 20; tip: "Zoom to 1 hour"; onClicked: root.zoomTo(3600000, root.pos, 0.75) }
                 IconButton { text: "1d"; size: 20; tip: "Zoom to 1 day"; onClicked: root.zoomTo(86400000, root.pos, 0.75) }
                 IconButton { text: "7d"; size: 20; tip: "Zoom to 1 week"; onClicked: root.zoomTo(7 * 86400000, root.pos, 0.85) }
-                IconButton {
-                    id: calBtn
-                    iconKind: "calendar"; iconSize: 12; size: 22; tip: "Go to a date"
-                    onClicked: calendar.open()
-                    CalendarPopup {
-                        id: calendar
-                        y: -height - 6
-                        x: calBtn.width - width
-                        selected: new Date(root.pos)
-                        onPicked: (d) => {
-                            // Jump to the start of that day and show the whole day.
-                            root.follow = true
-                            Clock.seek(d.getTime())
-                            root.zoomTo(86400000, d.getTime(), 0)
-                        }
+                Item { Layout.fillWidth: true }
+                // Back to live (only while playing back).
+                AbstractButton {
+                    id: goLive
+                    visible: !Clock.live
+                    implicitWidth: goLiveTxt.implicitWidth + 16
+                    implicitHeight: 22
+                    hoverEnabled: true
+                    onClicked: { root.follow = true; Clock.goLive() }
+                    ToolTip.visible: hovered
+                    ToolTip.delay: 600
+                    ToolTip.text: "Back to live video (L)"
+                    background: Rectangle { radius: 4; color: goLive.hovered ? "#33ff4757" : "transparent"; border.color: Theme.live }
+                    contentItem: Text {
+                        id: goLiveTxt
+                        text: "Go live"
+                        color: Theme.live
+                        font.pixelSize: 11
+                        font.weight: Font.DemiBold
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
                     }
                 }
+                // What you are watching: LIVE (red) or recorded footage (blue).
                 Rectangle {
-                    implicitWidth: liveTxt.implicitWidth + 20
+                    readonly property string label: Clock.live ? "● LIVE"
+                        : Clock.reverse ? "◂◂ REWIND " + Clock.speed + "×"
+                        : !Clock.playing ? "❚❚ PAUSED"
+                        : "▶ PLAYBACK" + (Clock.speed > 1 ? " " + Clock.speed + "×" : "")
+                    implicitWidth: Math.max(64, modeTxt.implicitWidth + 16)
                     implicitHeight: 22
                     radius: 4
-                    color: Clock.live ? Theme.live : liveMa.containsMouse ? Theme.raised : Theme.panelAlt
-                    border.color: Theme.live
+                    color: Clock.live ? Theme.live : Clock.playing || Clock.reverse ? "#1f6fd1" : "#2a3f5c"
                     Text {
-                        id: liveTxt
+                        id: modeTxt
                         anchors.centerIn: parent
-                        text: "● LIVE"
-                        color: Clock.live ? "white" : Theme.live
+                        text: parent.label
+                        color: "white"
                         font.pixelSize: 11
                         font.weight: Font.Bold
                     }
                     MouseArea {
-                        id: liveMa
                         anchors.fill: parent
+                        enabled: Clock.live
                         hoverEnabled: true
-                        onClicked: { root.follow = true; Clock.goLive() }
+                        ToolTip.visible: containsMouse
+                        ToolTip.delay: 600
+                        ToolTip.text: "Showing live video. Click the timeline to play back recordings."
                     }
                 }
             }

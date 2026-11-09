@@ -34,3 +34,24 @@ func TestScanLogLines(t *testing.T) {
 		}
 	}
 }
+
+// Substream recordings are video only: a camera that announces audio on its
+// substream but never sends any would otherwise block the recording.
+func TestRecordingAudio(t *testing.T) {
+	has := func(args []string, v string) bool {
+		for _, a := range args {
+			if a == v {
+				return true
+			}
+		}
+		return false
+	}
+	main := &Stream{Kind: "main", URL: "rtsp://192.168.1.64/main", RecordDir: "/rec", RecordAudio: true}
+	sub := &Stream{Kind: "sub", URL: "rtsp://192.168.1.64/sub", RecordDir: "/rec"}
+	if !has(main.Args(), "0:a:0?") || !has(main.Args(), "aac") {
+		t.Error("main recordings should keep the audio")
+	}
+	if has(sub.Args(), "0:a:0?") || has(sub.Args(), "aac") {
+		t.Error("substream recordings should not map audio")
+	}
+}

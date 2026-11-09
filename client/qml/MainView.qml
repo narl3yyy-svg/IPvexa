@@ -18,6 +18,8 @@ Item {
     // Layout tour: cycle through the open tabs.
     property bool touring: false
     property int tourSeconds: 10
+    // Playback: all cameras on the layout follow the timeline (sync), or only the selected one.
+    property bool syncPlayback: true
 
     // ---- Layout state (all layouts are saved automatically) ----
     property var layouts: []          // every layout
@@ -47,6 +49,7 @@ Item {
         property string quality: "auto"
         property int liveBufferMs: 600
         property int tourSeconds: 10
+        property bool syncPlayback: true
         // 0.1 keys, migrated once
         property string saved: "[]"
         property string current: ""
@@ -188,6 +191,7 @@ Item {
         rightVisible = store.rightVisible
         quality = ["auto", "high", "low"].indexOf(store.quality) >= 0 ? store.quality : "auto"
         tourSeconds = Math.max(3, Math.min(600, store.tourSeconds))
+        syncPlayback = store.syncPlayback
         liveBufferMs = [150, 600, 2500].indexOf(store.liveBufferMs) >= 0 ? store.liveBufferMs : 600
         var all = []
         try { all = JSON.parse(store.all || "[]") } catch (e) { all = [] }
@@ -235,33 +239,45 @@ Item {
             if (cam) { cameraDialog.load(cam); cameraDialog.open() }
         }
     }
-    // --open <what>: open a dialog or view on start (testing / support).
+    // --open <what>[,<what>…]: open dialogs or views on start (testing / support).
     // what = users | password | signout | addcamera | fullscreen:<tile> | maximize:<tile>
+    //        | add:<camera> | arrange | fit:<fit|fill|stretch> | sync:<on|off> | seek:<minutes ago>
     Timer {
         interval: 2500; running: Qt.application.arguments.indexOf("--open") >= 0
         onTriggered: {
             var a = Qt.application.arguments
-            var w = (a[a.indexOf("--open") + 1] || "").split(":")
-            switch (w[0]) {
-            case "users": usersDialog.open(); break
-            case "password": passwordDialog.open(); break
-            case "signout": logoutConfirm.open(); break
-            case "addcamera": cameraDialog.load(null); cameraDialog.open(); break
-            case "notifications": notificationsDialog.startPage = parseInt(w[1] || "0"); notificationsDialog.open(); break
-            case "audit": auditDialog.open(); break
-            case "settings": serverSettingsDialog.open(); break
-            case "tour": root.touring = true; break
-            case "wall": root.openWall(root.active, parseInt(w[1] || "0")); break
-            case "export": exportDialog.openAt(root.selectedCamera, "Camera", Date.now() - 300000, Date.now() - 240000); if (w[1] === "run") exportDialog.run(); break
-            case "camera": {
-                var c = Theme.findCamera(Api.cameras, parseInt(w[1]))
-                if (c) { cameraDialog.load(c); cameraDialog.open(); cameraDialog.page = parseInt(w[2] || "0") }
-                break
-            }
-            case "events": root.rightVisible = true; right.tab = 1; break
-            case "fullscreen": root.enterFullscreen(parseInt(w[1] || "0")); break
-            case "maximize": root.maximizedIndex = parseInt(w[1] || "0"); break
-            }
+            String(a[a.indexOf("--open") + 1] || "").split(",").forEach(function (what) { root.openForTesting(what.split(":")) })
+        }
+    }
+    function openForTesting(w) {
+        switch (w[0]) {
+        case "add": root.update(function (l) { // another tile of a camera (even if it is already shown)
+            var i = LE.indexOfCam(l, parseInt(w[1]))
+            return i >= 0 ? LE.duplicateItem(l, i) : LE.addCamera(l, parseInt(w[1]))
+        }); break
+        case "arrange": root.update(function (l) { return LE.fillScreen(l) }); break
+        case "fit": root.update(function (l) { return LE.setFit(l, w[1]) }); break
+        case "sync": root.syncPlayback = w[1] !== "off"; break
+        case "select": root.selectedIndex = parseInt(w[1] || "0"); break
+        case "seek": Clock.seek(Date.now() - parseInt(w[1] || "5") * 60000); break
+        case "users": usersDialog.open(); break
+        case "password": passwordDialog.open(); break
+        case "signout": logoutConfirm.open(); break
+        case "addcamera": cameraDialog.load(null); cameraDialog.open(); break
+        case "notifications": notificationsDialog.startPage = parseInt(w[1] || "0"); notificationsDialog.open(); break
+        case "audit": auditDialog.open(); break
+        case "settings": serverSettingsDialog.open(); break
+        case "tour": root.touring = true; break
+        case "wall": root.openWall(root.active, parseInt(w[1] || "0")); break
+        case "export": exportDialog.openAt(root.selectedCamera, "Camera", Date.now() - 300000, Date.now() - 240000); if (w[1] === "run") exportDialog.run(); break
+        case "camera": {
+            var c = Theme.findCamera(Api.cameras, parseInt(w[1]))
+            if (c) { cameraDialog.load(c); cameraDialog.open(); cameraDialog.page = parseInt(w[2] || "0") }
+            break
+        }
+        case "events": root.rightVisible = true; right.tab = 1; break
+        case "fullscreen": root.enterFullscreen(parseInt(w[1] || "0")); break
+        case "maximize": root.maximizedIndex = parseInt(w[1] || "0"); break
         }
     }
 
@@ -521,6 +537,12 @@ Item {
                             onDecrement: root.update(function (l) { return LE.setGrid(l, l.cols, l.rows - 1) })
                             onIncrement: root.update(function (l) { return LE.setGrid(l, l.cols, l.rows + 1) })
                         }
+                        IconButton {
+                            text: "Auto-arrange"
+                            enabled: root.cur.items.length > 0
+                            tip: "Arrange these cameras to fill the screen with no empty tiles (for example 5 cameras: 2 on top, 3 below). Drag the borders between tiles to resize them."
+                            onClicked: root.update(function (l) { return LE.fillScreen(l) })
+                        }
                         ToolSep {}
                         ToolText { text: "Tiles"; color: Theme.textFaint; font.pixelSize: 11 }
                         Segmented {
@@ -596,6 +618,7 @@ Item {
                     dragLayer: dragLayer
                     quality: root.quality
                     liveBufferMs: root.liveBufferMs
+                    syncPlayback: root.syncPlayback
                     searchCells: root.searchCells
                     searchIndex: {
                         for (var i = 0; i < root.cur.items.length; i++) if (root.cur.items[i].cam === root.searchCam) return i
@@ -627,6 +650,13 @@ Item {
                     onItemQualityPicked: (i, q) => root.update(function (l) { return LE.setQuality(l, i, q) })
                     onItemZoomCommitted: (i, z) => root.update(function (l) { return LE.setZoom(l, i, z) })
                     onItemDuplicateRequested: (i) => root.update(function (l) { return LE.duplicateItem(l, i) })
+                    onSizesCommitted: (cw, rh) => root.update(function (l) {
+                        var c = LE.clone(l)
+                        if (cw) c.cw = cw; else delete c.cw
+                        if (rh) c.rh = rh; else delete c.rh
+                        return c
+                    })
+                    onFitPicked: (f) => root.update(function (l) { return LE.setFit(l, f) })
                     onBackgroundMenuRequested: sceneMenu.popup()
                 }
             }
@@ -656,6 +686,9 @@ Item {
             cameraName: (Theme.findCamera(Api.cameras, root.selectedCamera) || {}).name || ""
             searchCells: root.searchCam === root.selectedCamera ? root.searchCells : ""
             fps: scene.selectedFps
+            sync: root.syncPlayback
+            cameraIds: root.cur.items.map(function (it) { return it.cam })
+            onSyncToggled: { root.syncPlayback = !root.syncPlayback; store.syncPlayback = root.syncPlayback }
             onSearchCleared: { root.searchCam = 0; root.searchCells = "" }
             onBookmarkRequested: (t) => bookmarkDialog.openAt(cameraId, cameraName, t)
             onExportRequested: (from, to) => exportDialog.openAt(cameraId, cameraName, from, to)
@@ -664,13 +697,23 @@ Item {
 
     Menu {
         id: sceneMenu
-        Menu {
-            title: "Arrange as"
-            Repeater {
-                model: LE.PRESETS
-                MenuItem { text: modelData; onTriggered: root.update(function (l) { return LE.applyPreset(l, modelData) }) }
-            }
+        MenuItem {
+            text: "Fill the screen with these cameras"
+            enabled: root.cur.items.length > 0
+            onTriggered: root.update(function (l) { return LE.fillScreen(l) })
         }
+        MenuItem {
+            text: "Make columns and rows equal"
+            enabled: LE.hasCustomSizes(root.cur)
+            onTriggered: root.update(function (l) { return LE.evenSizes(l) })
+        }
+        MenuItem {
+            text: "Maximize frames"
+            checkable: true
+            checked: root.cur.fit === "fill"
+            onTriggered: root.update(function (l) { return LE.setFit(l, l.fit === "fill" ? "fit" : "fill") })
+        }
+        MenuSeparator {}
         MenuItem { text: "Add column"; onTriggered: root.update(function (l) { return LE.setGrid(l, l.cols + 1, l.rows) }) }
         MenuItem { text: "Add row"; onTriggered: root.update(function (l) { return LE.setGrid(l, l.cols, l.rows + 1) }) }
         MenuItem { text: "Shrink grid to fit cameras"

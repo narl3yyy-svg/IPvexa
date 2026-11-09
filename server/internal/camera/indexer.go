@@ -2,6 +2,7 @@ package camera
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -32,7 +33,7 @@ func (m *Manager) runIndexer(ctx context.Context) {
 }
 
 func (m *Manager) indexAll() {
-	entries, err := os.ReadDir(m.RecRoot)
+	entries, err := os.ReadDir(m.Root())
 	if err != nil {
 		return
 	}
@@ -47,6 +48,11 @@ func (m *Manager) indexAll() {
 		m.indexCamera(id, !live)
 	}
 }
+
+// openSegmentIdle is how long the segment being recorded may go unwritten before
+// it is treated as finished (ffmpeg gone). It must exceed the longest keyframe
+// interval, since ffmpeg writes a fragment per keyframe.
+const openSegmentIdle = 3 * time.Minute
 
 type incomingFile struct {
 	path  string
@@ -85,7 +91,9 @@ func (m *Manager) indexCamera(id int64, stopped bool) {
 			newest := i == len(files)-1
 			if newest && !stopped {
 				// Still being written, unless ffmpeg has clearly stopped touching it.
-				if st, err := os.Stat(f.path); err == nil && time.Since(st.ModTime()) < 30*time.Second {
+				// Fragments are only written at keyframes, and some cameras (e.g. with
+				// "smart" codecs) send one every 20–30 s, so allow plenty of time.
+				if st, err := os.Stat(f.path); err == nil && time.Since(st.ModTime()) < openSegmentIdle {
 					continue
 				}
 			}
@@ -105,9 +113,32 @@ func (m *Manager) finalize(camID int64, stream string, f incomingFile) {
 		os.Remove(f.path)
 		return
 	}
+	// Some cameras lower the frame rate in the dark but keep stamping frames at
+	// the nominal rate, so the video's own clock runs slow. ffmpeg last wrote the
+	// file when the segment ended, which gives its real length; stretch the
+	// timestamps to match so playback stays in step with other cameras. Only for
+	// video-only (substream) recordings: main recordings carry real-time audio.
+	if stream == "sub" {
+		real := st.ModTime().Sub(time.Unix(f.start, 0)).Seconds()
+		if dur > 5 && real > dur*1.1 && real-dur > 3 && real < 3*60 {
+			if err := m.retime(f.path, real/dur); err != nil {
+				slog.Warn("could not correct segment timestamps", "path", f.path, "err", err)
+			} else if d := m.probeDuration(f.path); d > 0 {
+				slog.Debug("corrected slow segment timestamps", "path", f.path, "was", dur, "now", d)
+				dur = d
+				if st2, err := os.Stat(f.path); err == nil {
+					st = st2
+				}
+			}
+		}
+	}
 	t := time.Unix(f.start, 0).UTC()
 	rel := filepath.Join(strconv.FormatInt(camID, 10), stream, t.Format("2006"), t.Format("01"), t.Format("02"), filepath.Base(f.path))
-	dst := filepath.Join(m.RecRoot, rel)
+	root := m.Root()
+	dst := filepath.Join(root, rel)
+	if root != m.RecRoot {
+		rel = dst // outside the original folder: store the full path
+	}
 	if err := os.MkdirAll(filepath.Dir(dst), 0o750); err != nil {
 		slog.Error("mkdir", "err", err)
 		return
@@ -123,6 +154,21 @@ func (m *Manager) finalize(camID int64, stream string, f incomingFile) {
 	if err := m.Store.AddSegment(&seg); err != nil {
 		slog.Error("index segment", "err", err)
 	}
+}
+
+// retime rewrites a video-only segment with its timestamps multiplied by k.
+func (m *Manager) retime(path string, k float64) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	tmp := path + ".retime" // not .mp4, so the indexer never picks it up
+	out, err := exec.CommandContext(ctx, m.FFmpeg, "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
+		"-i", path, "-map", "0:v:0", "-c", "copy", "-bsf:v", fmt.Sprintf("setts=ts=TS*%.6f", k),
+		"-f", "mp4", tmp).CombinedOutput()
+	if err != nil {
+		os.Remove(tmp)
+		return fmt.Errorf("%v: %s", err, strings.TrimSpace(string(out)))
+	}
+	return os.Rename(tmp, path)
 }
 
 func (m *Manager) probeDuration(path string) float64 {
@@ -151,7 +197,7 @@ func (m *Manager) OpenSegment(camID int64, stream string) (path string, startMs 
 	}
 	f := files[len(files)-1]
 	st, err := os.Stat(f.path)
-	if err != nil || time.Since(st.ModTime()) > 30*time.Second {
+	if err != nil || time.Since(st.ModTime()) > openSegmentIdle {
 		return "", 0, false
 	}
 	return f.path, f.start * 1000, true

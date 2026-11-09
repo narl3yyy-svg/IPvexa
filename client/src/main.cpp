@@ -19,7 +19,7 @@ int main(int argc, char *argv[])
     app.setApplicationName("Ipvexa");
     app.setOrganizationName("Ipvexa");
     app.setApplicationDisplayName("IPvexa");
-    app.setApplicationVersion("0.3.0");
+    app.setApplicationVersion("0.4.0");
     app.setDesktopFileName("ipvexa");
 
     // FFmpeg's own messages (e.g. a camera's damaged first frames) are only useful when

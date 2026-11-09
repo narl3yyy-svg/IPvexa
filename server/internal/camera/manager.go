@@ -2,7 +2,10 @@ package camera
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strconv"
 	"sync"
@@ -14,10 +17,14 @@ import (
 
 // Manager owns the running streams for every enabled camera.
 type Manager struct {
-	Store   *store.Store
+	Store *store.Store
+	// RecRoot is the original recordings folder; segments stored with relative
+	// paths live under it. New recordings go to Root(), which may differ.
 	RecRoot string
-	FFmpeg  string
-	FFprobe string
+	// ActiveRoot, if set before Start, is where new recordings go (default RecRoot).
+	ActiveRoot string
+	FFmpeg     string
+	FFprobe    string
 	// OnEvent is called when a motion event starts (started=true) and when it ends.
 	OnEvent func(e store.Event, started bool)
 
@@ -41,6 +48,62 @@ type CameraStatus struct {
 	Main   *StreamStatus `json:"main,omitempty"`
 	Sub    *StreamStatus `json:"sub,omitempty"`
 	Motion bool          `json:"motion"`
+}
+
+// Root is the folder new recordings are written to.
+func (m *Manager) Root() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.ActiveRoot == "" {
+		return m.RecRoot
+	}
+	return m.ActiveRoot
+}
+
+// CheckRoot makes sure dir exists (creating it) and the server can write there.
+func CheckRoot(dir string) error {
+	if !filepath.IsAbs(dir) {
+		return errors.New("use a full path, e.g. /mnt/storage/ipvexa")
+	}
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return fmt.Errorf("can't create %s: %w", dir, err)
+	}
+	f, err := os.CreateTemp(dir, ".write-test-*")
+	if err != nil {
+		return fmt.Errorf("the server can't write to %s: %w", dir, err)
+	}
+	f.Close()
+	os.Remove(f.Name())
+	return nil
+}
+
+// SetRoot moves new recordings to dir. Cameras restart briefly; footage already
+// recorded stays where it is and remains playable.
+func (m *Manager) SetRoot(dir string) error {
+	dir = filepath.Clean(dir)
+	if dir == m.Root() {
+		return nil
+	}
+	if err := CheckRoot(dir); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	ids := make([]int64, 0, len(m.running))
+	for id := range m.running {
+		ids = append(ids, id)
+	}
+	m.mu.Unlock()
+	m.StopAll() // also files away the segments written so far
+	m.mu.Lock()
+	m.ActiveRoot = dir
+	m.mu.Unlock()
+	slog.Info("recordings folder changed", "dir", dir)
+	for _, id := range ids {
+		if c, err := m.Store.Camera(id); err == nil {
+			m.Apply(c)
+		}
+	}
+	return nil
 }
 
 func (m *Manager) Start(ctx context.Context) error {
@@ -87,7 +150,7 @@ func (m *Manager) runScheduler(ctx context.Context) {
 
 // IncomingDir is where ffmpeg writes segments before the indexer files them away.
 func (m *Manager) IncomingDir(camID int64, stream string) string {
-	return filepath.Join(m.RecRoot, strconv.FormatInt(camID, 10), stream, "incoming")
+	return filepath.Join(m.Root(), strconv.FormatInt(camID, 10), stream, "incoming")
 }
 
 // Apply (re)starts a camera with its current configuration.
@@ -109,7 +172,7 @@ func (m *Manager) Apply(c store.Camera) {
 	// With a substream for grids and motion, the main stream is only pulled while
 	// someone watches it in high quality, unless it is being recorded.
 	onDemand := c.SubURL != "" && mainRec == ""
-	r.main = &Stream{CameraID: c.ID, Kind: "main", URL: c.MainURL, Transport: c.Transport, RecordDir: mainRec, OnDemand: onDemand, Hub: NewHub(), FFmpeg: m.FFmpeg}
+	r.main = &Stream{CameraID: c.ID, Kind: "main", URL: c.MainURL, Transport: c.Transport, RecordDir: mainRec, RecordAudio: true, OnDemand: onDemand, Hub: NewHub(), FFmpeg: m.FFmpeg}
 	if c.SubURL != "" {
 		subRec := ""
 		if recording && c.RecordSub {
