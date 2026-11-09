@@ -10,6 +10,7 @@ Window {
     property string layoutName: ""
     property var layout: LE.make("", 1, 1)
     property string quality: "auto"
+    property int liveBufferMs: 600
     property int selectedIndex: -1
     property int maximizedIndex: -1
 
@@ -27,6 +28,7 @@ Window {
         layout: wall.layout
         interactive: false
         quality: wall.quality
+        liveBufferMs: wall.liveBufferMs
         selectedIndex: wall.selectedIndex
         maximizedIndex: wall.maximizedIndex
         dragLayer: wallDragLayer

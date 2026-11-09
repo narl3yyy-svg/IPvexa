@@ -26,9 +26,12 @@ type Stream struct {
 	URL       string
 	Transport string
 	RecordDir string // empty = don't record
-	Hub       *Hub
-	FFmpeg    string
-	log       *slog.Logger
+	// OnDemand streams only connect to the camera while someone is watching
+	// (saves camera and Wi-Fi bandwidth for main streams that aren't recorded).
+	OnDemand bool
+	Hub      *Hub
+	FFmpeg   string
+	log      *slog.Logger
 
 	mu      sync.Mutex
 	status  StreamStatus
@@ -36,7 +39,7 @@ type Stream struct {
 }
 
 type StreamStatus struct {
-	State      string  `json:"state"` // starting | online | offline | stopped
+	State      string  `json:"state"` // starting | online | offline | idle (on demand, unwatched) | stopped
 	Codec      string  `json:"codec,omitempty"`
 	Width      int     `json:"width,omitempty"`
 	Height     int     `json:"height,omitempty"`
@@ -139,6 +142,17 @@ func (s *Stream) Run(ctx context.Context) {
 	s.log = slog.With("camera", s.CameraID, "stream", s.Kind)
 	backoff := time.Second
 	for ctx.Err() == nil {
+		if s.OnDemand && s.Hub.Viewers() == 0 {
+			s.setState("idle", "")
+			select {
+			case <-ctx.Done():
+				continue
+			case <-s.Hub.Wake():
+			}
+			if s.Hub.Viewers() == 0 {
+				continue
+			}
+		}
 		if s.RecordDir != "" {
 			if err := os.MkdirAll(s.RecordDir, 0o750); err != nil {
 				s.setState("offline", "cannot create recording dir: "+err.Error())
@@ -146,9 +160,18 @@ func (s *Stream) Run(ctx context.Context) {
 		}
 		s.setState("starting", "")
 		start := time.Now()
-		err := s.runOnce(ctx)
+		runCtx, stopRun := context.WithCancel(ctx)
+		if s.OnDemand {
+			go s.stopWhenUnwatched(runCtx, stopRun)
+		}
+		err := s.runOnce(runCtx)
+		stopRun()
 		if ctx.Err() != nil {
 			break
+		}
+		if s.OnDemand && runCtx.Err() != nil && s.Hub.Viewers() == 0 {
+			backoff = time.Second // stopped because nobody is watching: not an error
+			continue
 		}
 		msg := "ffmpeg exited"
 		if err != nil {
@@ -172,6 +195,28 @@ func (s *Stream) Run(ctx context.Context) {
 		backoff = min(backoff*2, 30*time.Second)
 	}
 	s.setState("stopped", "")
+}
+
+// stopWhenUnwatched ends an on-demand session after 20 s without viewers.
+func (s *Stream) stopWhenUnwatched(ctx context.Context, stop context.CancelFunc) {
+	t := time.NewTicker(5 * time.Second)
+	defer t.Stop()
+	idle := 0
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		if s.Hub.Viewers() > 0 {
+			idle = 0
+			continue
+		}
+		if idle++; idle >= 4 {
+			stop()
+			return
+		}
+	}
 }
 
 func (s *Stream) runOnce(ctx context.Context) error {

@@ -8,6 +8,7 @@
 #include <QLibrary>
 #include <QVideoFrameFormat>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 
 extern "C" {
@@ -190,6 +191,62 @@ bool fetchPlayInfo(const QString &url, Interrupt *intr, PlayInfo *out)
     return true;
 }
 
+// Smooths live video from cameras that deliver frames in bursts (typically Wi-Fi).
+// It learns the smallest delay between a frame's timestamp and its arrival (the
+// camera's best case) and shows each frame at timestamp + that delay + the buffer,
+// so frames bunched together by the network are spread out again. Late frames are
+// shown at once, so the delay never grows beyond the buffer.
+class LivePacer
+{
+public:
+    // How long to wait (ms) before showing a frame with this timestamp.
+    qint64 wait(double ptsMs, qint64 nowMs, int bufferMs)
+    {
+        const double offset = double(nowMs) - ptsMs;
+        if (m_start < 0) {
+            m_start = nowMs;
+            reset(offset, nowMs);
+        } else if (std::abs(offset - m_min) > 10000) {
+            reset(offset, nowMs); // the camera's timestamps jumped
+        }
+        m_min = std::min(m_min, offset);
+        m_windowMin = std::min(m_windowMin, offset);
+        if (nowMs - m_windowStart > 10000) { // follow slow clock drift
+            m_min = m_windowMin;
+            m_windowMin = offset;
+            m_windowStart = nowMs;
+        }
+        // The first moments are the server's cached frames: play through them.
+        if (bufferMs <= 0 || nowMs - m_start < 1500)
+            return 0;
+        const double due = ptsMs + m_min + bufferMs;
+        return due > double(nowMs) ? qint64(std::min(due - double(nowMs), double(bufferMs))) : 0;
+    }
+
+private:
+    void reset(double offset, qint64 nowMs)
+    {
+        m_min = m_windowMin = offset;
+        m_windowStart = nowMs;
+    }
+    qint64 m_start = -1;
+    double m_min = 0, m_windowMin = 0;
+    qint64 m_windowStart = 0;
+};
+
+// Sleep up to ms in small steps, returning false if the player is stopping.
+bool sleepFine(VideoPlayer *p, int gen, qint64 ms)
+{
+    while (ms > 0) {
+        if (p->shouldStop(gen))
+            return false;
+        const qint64 step = std::min<qint64>(ms, 5);
+        std::this_thread::sleep_for(std::chrono::milliseconds(step));
+        ms -= step;
+    }
+    return true;
+}
+
 struct SessionResult {
     bool opened = false;
     qint64 lastWall = 0; // wall time of the last frame shown (playback)
@@ -299,6 +356,11 @@ SessionResult runSession(VideoPlayer *p, Interrupt *intr, const QString &url, bo
     fpsTimer.start();
     int frames = 0, decodeErrors = 0;
     auto *clock = PlaybackClock::instance();
+    LivePacer pacer;
+    QElapsedTimer steady;
+    steady.start();
+    qint64 lastShown = -1, maxGap = 0; // frame timing, logged with IPVEXA_DEBUG=1
+    static const bool debugTiming = !qEnvironmentVariableIsEmpty("IPVEXA_DEBUG");
 
     auto handleFrame = [&](AVFrame *f) -> bool {
         AVFrame *out = f;
@@ -308,6 +370,12 @@ SessionResult runSession(VideoPlayer *p, Interrupt *intr, const QString &url, bo
                 return true;
             av_frame_copy_props(swFrame, f);
             out = swFrame;
+        }
+        if (live && f->best_effort_timestamp != AV_NOPTS_VALUE) {
+            const double ptsMs = double(f->best_effort_timestamp) * tb * 1000.0;
+            const qint64 waitMs = pacer.wait(ptsMs, steady.elapsed(), p->liveBufferMs());
+            if (waitMs > 0 && !sleepFine(p, intr->gen, waitMs))
+                return false;
         }
         qint64 wall = clock->now();
         if (!live && info) {
@@ -334,8 +402,15 @@ SessionResult runSession(VideoPlayer *p, Interrupt *intr, const QString &url, bo
         if (vf.isValid())
             p->postFrame(vf, wall);
         ++frames;
+        const qint64 shownAt = steady.elapsed();
+        if (lastShown >= 0)
+            maxGap = std::max(maxGap, shownAt - lastShown);
+        lastShown = shownAt;
         if (fpsTimer.elapsed() >= 1000) {
             const double fps = frames * 1000.0 / fpsTimer.restart();
+            if (debugTiming && live)
+                qInfo("camera %d: %.1f fps shown, longest pause %lld ms", p->cameraId(), fps, (long long)maxGap);
+            maxGap = 0;
             frames = 0;
             p->postInfo(QString("%1 %2×%3 · %4 fps · %5")
                             .arg(QString(codec->name).toUpper())
@@ -488,6 +563,13 @@ void VideoPlayer::setLive(bool l)
     m_live = l;
     emit liveChanged();
     restart();
+}
+
+void VideoPlayer::setLiveBufferMs(int ms)
+{
+    ms = qBound(0, ms, 5000);
+    if (m_liveBufferMs.exchange(ms) != ms)
+        emit liveBufferMsChanged(); // applies from the next frame; no reconnect needed
 }
 
 void VideoPlayer::setActive(bool a)

@@ -40,9 +40,21 @@ QtObject {
         return null
     }
 
+    // A camera's state: its main stream's, except that an idle on-demand main stream
+    // (high quality not being watched) means "look at the substream".
+    function cameraState(cam) {
+        if (!cam) return "offline"
+        if (!cam.enabled) return "disabled"
+        var m = cam.status && cam.status.main ? cam.status.main : null
+        var s = cam.status && cam.status.sub ? cam.status.sub : null
+        if (m && m.state === "idle") return s ? s.state : "online"
+        return m ? m.state : "offline"
+    }
+
     function stateColor(state) {
         switch (state) {
         case "online": return online
+        case "idle": return online   // on-demand high-quality stream, not watched right now
         case "starting": return warn
         case "offline": return live
         default: return offline

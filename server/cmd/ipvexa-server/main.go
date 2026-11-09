@@ -117,7 +117,8 @@ func main() {
 			st := mgr.Status(c.ID)
 			cs := notify.CameraState{ID: c.ID, Name: c.Name, Enabled: c.Enabled}
 			if st.Main != nil {
-				cs.Online = st.Main.State == "online"
+				// An idle on-demand main stream is fine; judge by the substream then.
+				cs.Online = st.Main.State == "online" || (st.Main.State == "idle" && st.Sub != nil && st.Sub.State == "online")
 				cs.Error = st.Main.LastError
 			}
 			out = append(out, cs)

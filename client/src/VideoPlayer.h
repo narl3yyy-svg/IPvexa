@@ -21,6 +21,9 @@ class VideoPlayer : public QObject
     Q_PROPERTY(QString stream READ stream WRITE setStream NOTIFY streamChanged)
     Q_PROPERTY(bool live READ live WRITE setLive NOTIFY liveChanged)
     Q_PROPERTY(bool active READ active WRITE setActive NOTIFY activeChanged)
+    // Live smoothing: frames are shown up to this many ms late so that bursty
+    // delivery (Wi-Fi cameras) plays evenly. 0 = show every frame as it arrives.
+    Q_PROPERTY(int liveBufferMs READ liveBufferMs WRITE setLiveBufferMs NOTIFY liveBufferMsChanged)
     Q_PROPERTY(QString state READ state NOTIFY stateChanged)
     Q_PROPERTY(QString info READ info NOTIFY infoChanged)
     Q_PROPERTY(double fps READ fps NOTIFY infoChanged)
@@ -40,6 +43,8 @@ public:
     void setLive(bool l);
     bool active() const { return m_active; }
     void setActive(bool a);
+    int liveBufferMs() const { return m_liveBufferMs.load(); }
+    void setLiveBufferMs(int ms);
     QString state() const { return m_state; }
     QString info() const { return m_info; }
     double fps() const { return m_fps; }
@@ -58,6 +63,7 @@ signals:
     void streamChanged();
     void liveChanged();
     void activeChanged();
+    void liveBufferMsChanged();
     void stateChanged();
     void infoChanged();
     void frameTimeChanged();
@@ -73,6 +79,7 @@ private:
     QString m_stream = "sub";
     bool m_live = true;
     bool m_active = true;
+    std::atomic<int> m_liveBufferMs{600};
     QString m_state = "idle";
     QString m_info;
     double m_fps = 0;

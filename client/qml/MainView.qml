@@ -11,6 +11,7 @@ Item {
     // The window this view lives in (for full screen).
     readonly property var win: Window.window
     property string quality: "auto"   // layout-wide stream quality: auto | high | low
+    property int liveBufferMs: 600    // live smoothing: 150 fast, 600 smooth, 2500 smoothest
     // Smart search (motion inside an area of one camera)
     property int searchCam: 0
     property string searchCells: ""
@@ -44,6 +45,7 @@ Item {
         property bool treeVisible: true
         property bool rightVisible: true
         property string quality: "auto"
+        property int liveBufferMs: 600
         property int tourSeconds: 10
         // 0.1 keys, migrated once
         property string saved: "[]"
@@ -146,7 +148,8 @@ Item {
         var w = wallComponent.createObject(null, {
             layoutName: name,
             screen: Qt.application.screens[screenIndex],
-            quality: root.quality
+            quality: root.quality,
+            liveBufferMs: root.liveBufferMs
         })
         if (!w) return
         w.layout = Qt.binding(function () { return root.findLayout(name) || LE.make(name, 1, 1) })
@@ -185,6 +188,7 @@ Item {
         rightVisible = store.rightVisible
         quality = ["auto", "high", "low"].indexOf(store.quality) >= 0 ? store.quality : "auto"
         tourSeconds = Math.max(3, Math.min(600, store.tourSeconds))
+        liveBufferMs = [150, 600, 2500].indexOf(store.liveBufferMs) >= 0 ? store.liveBufferMs : 600
         var all = []
         try { all = JSON.parse(store.all || "[]") } catch (e) { all = [] }
         if (all.length === 0) {
@@ -505,23 +509,6 @@ Item {
                             onClicked: { root.treeVisible = !root.treeVisible; store.treeVisible = root.treeVisible }
                         }
                         ToolSep {}
-                        // Presets
-                        Repeater {
-                            model: LE.PRESETS
-                            IconButton {
-                                required property string modelData
-                                size: 28
-                                tip: "Arrange cameras: " + modelData
-                                onClicked: { root.maximizedIndex = -1; root.update(function (l) { return LE.applyPreset(l, modelData) }) }
-                                GridGlyph {
-                                    anchors.centerIn: parent
-                                    width: 16; height: 12
-                                    preset: modelData
-                                    color: parent.hovered ? Theme.text : Theme.textDim
-                                }
-                            }
-                        }
-                        ToolSep {}
                         // Grid size
                         ToolText { text: "Grid"; color: Theme.textFaint; font.pixelSize: 11 }
                         Stepper {
@@ -551,6 +538,15 @@ Item {
                                       { value: "high", label: "High", tip: "High quality (main stream) for every tile" },
                                       { value: "low", label: "Low", tip: "Low quality (substream) for every tile: lightest on network and CPU" }]
                             onPicked: (v) => { root.quality = v; store.quality = v }
+                        }
+                        ToolSep {}
+                        ToolText { text: "Live"; color: Theme.textFaint; font.pixelSize: 11 }
+                        Segmented {
+                            value: String(root.liveBufferMs)
+                            options: [{ value: "150", label: "Fast", tip: "Lowest delay. Wi-Fi cameras may stutter." },
+                                      { value: "600", label: "Smooth", tip: "About half a second of delay to even out uneven delivery (recommended)" },
+                                      { value: "2500", label: "Smoothest", tip: "About 2.5 s of delay: hides the longer pauses of weak Wi-Fi cameras" }]
+                            onPicked: (v) => { root.liveBufferMs = parseInt(v); store.liveBufferMs = root.liveBufferMs }
                         }
                         Item { Layout.fillWidth: true }
                         IconButton {
@@ -599,6 +595,7 @@ Item {
                     maximizedIndex: root.maximizedIndex
                     dragLayer: dragLayer
                     quality: root.quality
+                    liveBufferMs: root.liveBufferMs
                     searchCells: root.searchCells
                     searchIndex: {
                         for (var i = 0; i < root.cur.items.length; i++) if (root.cur.items[i].cam === root.searchCam) return i

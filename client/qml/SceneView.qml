@@ -13,6 +13,7 @@ Rectangle {
     property int maximizedIndex: -1
     property Item dragLayer
     property string quality: "auto"
+    property int liveBufferMs: 600
     property int searchIndex: -1       // tile showing the smart-search area
     property string searchCells: ""
 
@@ -118,6 +119,7 @@ Rectangle {
             maximized: isMax
             dragLayer: root.dragLayer
             sceneQuality: root.quality
+            liveBufferMs: root.liveBufferMs
             qualityOverride: it.q || ""
             searchCells: root.searchIndex === index ? root.searchCells : ""
             zoomState: it.z

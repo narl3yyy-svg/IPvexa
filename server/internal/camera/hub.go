@@ -20,6 +20,7 @@ type Hub struct {
 	carry   []byte
 	maxGOP  int
 	bytesIn uint64
+	wake    chan struct{} // signalled when a viewer subscribes
 }
 
 type Sub struct {
@@ -29,8 +30,11 @@ type Sub struct {
 }
 
 func NewHub() *Hub {
-	return &Hub{subs: map[*Sub]struct{}{}, maxGOP: 16 << 20}
+	return &Hub{subs: map[*Sub]struct{}{}, maxGOP: 16 << 20, wake: make(chan struct{}, 1)}
 }
+
+// Wake fires when a viewer subscribes (used to start on-demand streams).
+func (h *Hub) Wake() <-chan struct{} { return h.wake }
 
 // Subscribe registers a viewer. The returned channel first delivers the cached
 // stream header and GOP, then live data. It is closed if the viewer falls too far behind.
@@ -46,6 +50,10 @@ func (h *Hub) Subscribe() *Sub {
 		s.C <- head
 	}
 	h.subs[s] = struct{}{}
+	select {
+	case h.wake <- struct{}{}:
+	default:
+	}
 	return s
 }
 

@@ -110,7 +110,7 @@ Rectangle {
                         required property int modelData
                         readonly property var cam: Theme.findCamera(Api.cameras, modelData) || ({})
                         readonly property var st: cam.status && cam.status.main ? cam.status.main : null
-                        readonly property string state: !cam.enabled ? "disabled" : (st ? st.state : "offline")
+                        readonly property string state: Theme.cameraState(cam)
                         width: treeCol.width
                         height: 28
 

@@ -20,6 +20,7 @@ Rectangle {
     property bool ptzMode: false
     property bool showInfo: false
     property string sceneQuality: "auto"      // layout-wide: auto | high | low
+    property int liveBufferMs: 600            // live smoothing (see VideoPlayer.liveBufferMs)
     property string qualityOverride: ""       // this tile: "" (follow layout) | high | low
     readonly property string quality: qualityOverride !== "" ? qualityOverride : sceneQuality
     readonly property bool hasSub: hasCam && !!cam.sub_url
@@ -107,6 +108,7 @@ Rectangle {
         cameraId: root.hasCam ? root.cameraId : 0
         stream: root.streamChoice
         live: Clock.live
+        liveBufferMs: root.liveBufferMs
         active: root.visible && root.hasCam && root.cam.enabled
     }
 
@@ -200,7 +202,7 @@ Rectangle {
             Rectangle {
                 anchors.verticalCenter: parent.verticalCenter
                 width: 7; height: 7; radius: 3.5
-                color: Theme.stateColor(root.mainStatus ? root.mainStatus.state : "offline")
+                color: Theme.stateColor(Theme.cameraState(root.cam))
             }
             Text {
                 text: root.cam ? root.cam.name : ""
@@ -277,7 +279,6 @@ Rectangle {
                 }
             }
             TileButton { icon: "info"; tip: "Stream information"; active: root.showInfo; onClicked: root.showInfo = !root.showInfo }
-            TileButton { icon: root.maximized ? "restore" : "maximize"; tip: root.maximized ? "Restore (double-click)" : "Maximize (double-click)"; onClicked: root.maximizeToggled() }
             TileButton { icon: "fullscreen"; tip: "Full screen"; onClicked: root.fullscreenRequested() }
             TileButton { visible: Api.isAdmin && root.editable; icon: "settings"; tip: "Camera settings"; onClicked: root.settingsRequested() }
             TileButton { visible: root.editable; icon: "close"; tip: "Remove from layout (Delete)"; hoverColor: "#c0ff4757"; onClicked: root.closeRequested() }

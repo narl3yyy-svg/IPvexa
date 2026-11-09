@@ -106,7 +106,10 @@ func (m *Manager) Apply(c store.Camera) {
 	if recording {
 		mainRec = m.IncomingDir(c.ID, "main")
 	}
-	r.main = &Stream{CameraID: c.ID, Kind: "main", URL: c.MainURL, Transport: c.Transport, RecordDir: mainRec, Hub: NewHub(), FFmpeg: m.FFmpeg}
+	// With a substream for grids and motion, the main stream is only pulled while
+	// someone watches it in high quality, unless it is being recorded.
+	onDemand := c.SubURL != "" && mainRec == ""
+	r.main = &Stream{CameraID: c.ID, Kind: "main", URL: c.MainURL, Transport: c.Transport, RecordDir: mainRec, OnDemand: onDemand, Hub: NewHub(), FFmpeg: m.FFmpeg}
 	if c.SubURL != "" {
 		subRec := ""
 		if recording && c.RecordSub {

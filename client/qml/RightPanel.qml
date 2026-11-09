@@ -46,7 +46,7 @@ Rectangle {
             var now = Date.now()
             Api.cameras.forEach(function (c) {
                 var m = c.status && c.status.main ? c.status.main : {}
-                var st = !c.enabled ? "disabled" : (m.state || "offline")
+                var st = Theme.cameraState(c)
                 var cur = { state: st === "starting" ? (seen[c.id] ? seen[c.id].state : "starting") : st, recording: !!m.recording }
                 next[c.id] = cur
                 var prev = seen[c.id]
@@ -364,9 +364,9 @@ Rectangle {
                             spacing: 3
                             RowLayout {
                                 width: parent.width
-                                Rectangle { implicitWidth: 7; implicitHeight: 7; radius: 3.5; color: Theme.stateColor(!modelData.enabled ? "disabled" : (m ? m.state : "offline")) }
+                                Rectangle { implicitWidth: 7; implicitHeight: 7; radius: 3.5; color: Theme.stateColor(Theme.cameraState(modelData)) }
                                 Text { Layout.fillWidth: true; text: modelData.name; color: Theme.text; font.pixelSize: 12; font.weight: Font.DemiBold; elide: Text.ElideRight }
-                                Text { text: m ? m.state : "—"; color: Theme.textDim; font.pixelSize: 10 }
+                                Text { text: Theme.cameraState(modelData) + (m && m.state === "idle" ? " · HD on demand" : ""); color: Theme.textDim; font.pixelSize: 10 }
                             }
                             Text {
                                 text: m && m.width ? (m.codec || "").toUpperCase() + " " + m.width + "×" + m.height + (m.fps ? " @ " + m.fps + " fps" : "")
@@ -380,7 +380,7 @@ Rectangle {
                                 color: Theme.textFaint; font.pixelSize: 10
                             }
                             Text {
-                                visible: !!(m && m.state !== "online" && m.last_error)
+                                visible: !!(m && Theme.cameraState(modelData) === "offline" && m.last_error)
                                 width: parent.width
                                 text: m && m.last_error ? m.last_error : ""
                                 color: "#ff8a93"; font.pixelSize: 10; elide: Text.ElideRight

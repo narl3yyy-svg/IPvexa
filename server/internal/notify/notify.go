@@ -174,6 +174,7 @@ type Notifier struct {
 	Auth func(r *http.Request) bool
 
 	mu       sync.Mutex
+	topicMu  sync.Mutex
 	subs     map[chan Message]struct{}
 	history  []Message
 	files    map[string]file
@@ -194,6 +195,9 @@ func randomID(n int) string {
 
 // Topic is the feed name phones subscribe to; created on first use.
 func (n *Notifier) Topic() string {
+	// Serialised so concurrent alerts can't each create a different name.
+	n.topicMu.Lock()
+	defer n.topicMu.Unlock()
 	t, _ := n.Store.Setting("ntfy_topic")
 	if t == "" {
 		t = "ipvexa-" + randomID(4)
