@@ -17,7 +17,8 @@ Rectangle {
     property int liveBufferMs: 600
     property int searchIndex: -1       // tile showing the smart-search area
     property string searchCells: ""
-    property bool syncPlayback: true   // false: only the selected tile follows the timeline
+    property bool syncPlayback: true
+    property bool showSelection: true  // blue outline on the selected tile   // false: only the selected tile follows the timeline
 
     signal itemSelected(int index)
     signal maximizeToggled(int index)
@@ -42,7 +43,8 @@ Rectangle {
     readonly property int rows: layout ? layout.rows : 1
     readonly property real ratio: !layout || layout.aspect === "16:9" ? 16 / 9 : layout.aspect === "4:3" ? 4 / 3 : 0
     readonly property string fit: layout && layout.fit ? layout.fit : "fit"
-    readonly property real pad: 8
+    property real edge: 8              // space around the layout (0 in full screen)
+    readonly property real pad: edge
     readonly property real availW: width - pad * 2
     readonly property real availH: height - pad * 2
     readonly property real cellW: ratio > 0 ? Math.min(availW / cols, availH / rows * ratio) : availW / cols
@@ -72,11 +74,15 @@ Rectangle {
         return { x: find(colEdges, (q.x - originX) / gridW), y: find(rowEdges, (q.y - originY) / gridH), px: q.x, py: q.y }
     }
 
-    // Right-click on empty scene area → layout menu.
+    // Click on empty scene area (around and between tiles, empty cells): deselect.
+    // Right-click: layout menu.
     MouseArea {
         anchors.fill: parent
-        acceptedButtons: Qt.RightButton
-        onClicked: root.backgroundMenuRequested()
+        acceptedButtons: Qt.LeftButton | Qt.RightButton
+        onClicked: (m) => {
+            if (m.button === Qt.RightButton) root.backgroundMenuRequested()
+            else root.itemSelected(-1)
+        }
     }
 
     // ---- Empty cells: drop targets ----
@@ -143,6 +149,7 @@ Rectangle {
             qualityOverride: it.q || ""
             searchCells: root.searchIndex === index ? root.searchCells : ""
             fitMode: root.fit
+            showSelection: root.showSelection
             followsTimeline: root.syncPlayback || selected
             zoomState: it.z
             editable: root.interactive

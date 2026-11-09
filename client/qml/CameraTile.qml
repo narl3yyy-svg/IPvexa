@@ -11,6 +11,7 @@ Rectangle {
     property int itemIndex: -1
     property int cameraId: 0
     property bool selected: false
+    property bool showSelection: true    // false in full screen: no blue outline
     property bool maximized: false
     property Item dragLayer
     property bool dragging: dragMa.drag.active
@@ -90,8 +91,9 @@ Rectangle {
 
     color: "#000000"
     clip: true
-    border.width: selected ? 2 : 1
-    border.color: drop.containsDrag ? Theme.accent : selected ? Theme.accent : "#262f35"
+    readonly property bool outlined: selected && showSelection
+    border.width: outlined ? 2 : 1
+    border.color: drop.containsDrag || outlined ? Theme.accent : "#262f35"
     opacity: dragging ? 0.45 : 1
 
     // Auto quality uses the high-resolution stream only when the tile is big enough to
@@ -190,10 +192,12 @@ Rectangle {
         }
     }
 
-    // ---- Top bar: name (always) + toolbar (hover/selected) ----
+    // ---- Top bar: name + toolbar, shown while the mouse is over the tile ----
     Rectangle {
         id: header
-        visible: root.hasCam
+        visible: root.hasCam && opacity > 0
+        opacity: hover.hovered || areaMa.visible ? 1 : 0
+        Behavior on opacity { NumberAnimation { duration: 150 } }
         anchors { left: parent.left; right: parent.right; top: parent.top; margins: root.border.width }
         height: 30
         gradient: Gradient {
@@ -258,7 +262,6 @@ Rectangle {
             anchors.verticalCenter: parent.verticalCenter
             anchors.verticalCenterOffset: -2
             spacing: 3
-            visible: hover.hovered || root.selected
             TileButton {
                 visible: root.hasSub
                 label: root.qualityOverride === "high" ? "HD" : root.qualityOverride === "low" ? "SD" : "AUTO"
@@ -318,9 +321,11 @@ Rectangle {
         }
     }
 
-    // ---- Bottom-left: time ----
+    // ---- Bottom-left: LIVE (on hover) or the recording's time (always) ----
     Rectangle {
-        visible: root.hasCam && player.state === "playing" && root.height > 90
+        visible: root.hasCam && player.state === "playing" && root.height > 90 && opacity > 0
+        opacity: hover.hovered || !root.isLive ? 1 : 0
+        Behavior on opacity { NumberAnimation { duration: 150 } }
         anchors { left: parent.left; bottom: parent.bottom; margins: 6 + root.border.width }
         width: timeText.implicitWidth + 12
         height: 18
@@ -350,7 +355,7 @@ Rectangle {
     // ---- Resize handle (bottom-right) ----
     Item {
         id: grip
-        visible: (hover.hovered || root.selected) && !root.maximized && root.hasCam && root.editable
+        visible: hover.hovered && !root.maximized && root.hasCam && root.editable
         width: 18; height: 18
         anchors.right: parent.right
         anchors.bottom: parent.bottom

@@ -29,7 +29,8 @@ Item {
     property int maximizedIndex: -1
     property bool treeVisible: true
     property bool rightVisible: true
-    property bool fullscreenMode: false
+    property bool fullscreenMode: false   // window full screen with every panel hidden
+    property bool fullscreenLayout: false // ... showing the whole layout (else one camera)
     property int prevVisibility: Window.Windowed
 
     readonly property var cur: findLayout(active) || LE.make(active, 2, 2)
@@ -129,8 +130,10 @@ Item {
     }
 
     // Camera full screen: the window goes full screen showing only that camera.
+    // In layout full screen it just fills the screen with that camera (Esc goes back).
     function enterFullscreen(index) {
         if (!win) return
+        if (fullscreenLayout) { maximizedIndex = index; selectedIndex = index; return }
         if (!fullscreenMode) prevVisibility = win.visibility
         fullscreenMode = true
         maximizedIndex = index
@@ -161,7 +164,9 @@ Item {
     }
 
     function exitFullscreen() {
+        if (fullscreenLayout && maximizedIndex >= 0) { maximizedIndex = -1; return } // back to the whole layout
         touring = false
+        fullscreenLayout = false
         if (!fullscreenMode) {
             maximizedIndex = -1
             if (win && win.visibility === Window.FullScreen) win.showNormal()
@@ -174,16 +179,22 @@ Item {
         else if (prevVisibility === Window.FullScreen) win.showFullScreen()
         else win.showNormal()
     }
-    // Whole-window full screen (F11), keeping the panels.
+    // Layout full screen (F11): only the live cameras of the layout, edge to edge,
+    // with no title bar, toolbar, panels or timeline. Esc (or F11) leaves it.
     function toggleWindowFullscreen() {
         if (!win) return
-        if (fullscreenMode) { exitFullscreen(); return }
-        if (win.visibility === Window.FullScreen) {
-            if (prevVisibility === Window.Maximized) win.showMaximized(); else win.showNormal()
-        } else {
-            prevVisibility = win.visibility
-            win.showFullScreen()
+        if (fullscreenMode) {
+            fullscreenLayout = false // leave completely, even from a maximized camera
+            exitFullscreen()
+            return
         }
+        prevVisibility = win.visibility
+        maximizedIndex = -1
+        selectedIndex = -1
+        fullscreenLayout = true
+        fullscreenMode = true
+        Clock.goLive()
+        win.showFullScreen()
     }
 
     Component.onCompleted: {
@@ -241,7 +252,7 @@ Item {
     }
     // --open <what>[,<what>…]: open dialogs or views on start (testing / support).
     // what = users | password | signout | addcamera | fullscreen:<tile> | maximize:<tile>
-    //        | add:<camera> | arrange | fit:<fit|fill|stretch> | sync:<on|off> | seek:<minutes ago>
+    //        | layoutfull | add:<camera> | arrange | fit:<fit|fill|stretch> | sync:<on|off> | seek:<minutes ago>
     Timer {
         interval: 2500; running: Qt.application.arguments.indexOf("--open") >= 0
         onTriggered: {
@@ -277,6 +288,7 @@ Item {
         }
         case "events": root.rightVisible = true; right.tab = 1; break
         case "fullscreen": root.enterFullscreen(parseInt(w[1] || "0")); break
+        case "layoutfull": root.toggleWindowFullscreen(); break
         case "maximize": root.maximizedIndex = parseInt(w[1] || "0"); break
         }
     }
@@ -615,6 +627,8 @@ Item {
                     layout: root.cur
                     selectedIndex: root.selectedIndex
                     maximizedIndex: root.maximizedIndex
+                    edge: root.fullscreenMode ? 0 : 8
+                    showSelection: !root.fullscreenMode
                     dragLayer: dragLayer
                     quality: root.quality
                     liveBufferMs: root.liveBufferMs
@@ -632,7 +646,7 @@ Item {
                     }
                     onItemSelected: (i) => root.selectedIndex = i
                     onMaximizeToggled: (i) => {
-                        if (root.fullscreenMode) { root.exitFullscreen(); return }
+                        if (root.fullscreenMode && !root.fullscreenLayout) { root.exitFullscreen(); return }
                         root.maximizedIndex = (root.maximizedIndex === i ? -1 : i)
                     }
                     onFullscreenRequested: (i) => {
@@ -679,7 +693,7 @@ Item {
 
         Timeline {
             id: timeline
-            visible: Api.canPlayback
+            visible: Api.canPlayback && !root.fullscreenMode
             Layout.fillWidth: true
             Layout.preferredHeight: 92
             cameraId: root.selectedCamera
