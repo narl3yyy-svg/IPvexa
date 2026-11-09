@@ -73,3 +73,17 @@ func TestMotionArgsGPU(t *testing.T) {
 		t.Errorf("GPU args: %s", gpu)
 	}
 }
+
+func TestStopReason(t *testing.T) {
+	tail := []string{
+		"[rtsp @ 0x1] method SETUP failed: 453 Not Enough Bandwidth",
+		"[in#0 @ 0x2] Error opening input: Server returned 4XX Client Error, but not one of 40{0,1,3,4}",
+		"Error opening input files: Server returned 4XX Client Error, but not one of 40{0,1,3,4}",
+	}
+	if got := stopReason(tail); !strings.Contains(got, "453 Not Enough Bandwidth") || !strings.Contains(got, "as many viewers") {
+		t.Errorf("got %q", got)
+	}
+	if got := stopReason([]string{"Connection timed out"}); got != "Connection timed out" {
+		t.Errorf("got %q", got)
+	}
+}

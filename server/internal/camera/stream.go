@@ -147,6 +147,27 @@ func (s *Stream) Args() []string {
 	return a
 }
 
+// stopReason picks the most useful line from ffmpeg's last log lines. When a
+// camera refuses a connection, ffmpeg's final line only says "Server returned 4XX
+// Client Error, but not one of 40{0,1,3,4}"; the camera's own reason (e.g. "453
+// Not Enough Bandwidth" when it already has as many viewers as it can serve) is
+// in the RTSP line before it.
+func stopReason(tail []string) string {
+	for i := len(tail) - 1; i >= 0 && i >= len(tail)-6; i-- {
+		j := strings.Index(tail[i], "method ")
+		k := strings.Index(tail[i], " failed: ")
+		if j < 0 || k < j {
+			continue
+		}
+		reason := strings.TrimSpace(tail[i][k+len(" failed: "):])
+		if strings.HasPrefix(reason, "453") {
+			return "The camera refused the stream (" + reason + "): it is already sending video to as many viewers as it can. Close other apps or servers watching this camera, or restart the camera."
+		}
+		return "The camera refused the stream: " + tail[i][j:]
+	}
+	return tail[len(tail)-1]
+}
+
 // Run keeps ffmpeg running until ctx is cancelled, reconnecting with backoff.
 func (s *Stream) Run(ctx context.Context) {
 	s.log = slog.With("camera", s.CameraID, "stream", s.Kind)
@@ -188,7 +209,7 @@ func (s *Stream) Run(ctx context.Context) {
 			msg = err.Error()
 		}
 		if tail := s.LogTail(); len(tail) > 0 {
-			msg = tail[len(tail)-1]
+			msg = stopReason(tail)
 		}
 		s.setState("offline", msg)
 		s.mu.Lock()
