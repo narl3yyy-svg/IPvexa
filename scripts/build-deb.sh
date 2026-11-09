@@ -11,12 +11,22 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WHAT="${1:-all}"
 VERSION="$(sed -n 's/^const Version = "\(.*\)"$/\1/p' "$ROOT/server/internal/api/api.go")"
+# Every build from a newer commit gets a higher package version (0.4.0+r57.565ad05),
+# so installing it always replaces the previous build, even when the release number
+# hasn't changed. Uncommitted changes add a build time so they count as newer too.
+if git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1; then
+  VERSION="$VERSION+r$(git -C "$ROOT" rev-list --count HEAD).$(git -C "$ROOT" rev-parse --short HEAD)"
+  if [[ -n "$(git -C "$ROOT" status --porcelain --untracked-files=no)" ]]; then
+    VERSION="$VERSION.local$(date +%s)"
+  fi
+fi
 ARCH="$(dpkg --print-architecture)"
 MAINT="IPvexa project <283486160+narl3yyy-svg@users.noreply.github.com>"
 OUT="$ROOT/dist"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$OUT"
+echo "$VERSION" > "$OUT/.version" # read by install-linux.sh
 
 build_server() {
   echo "==> Building ipvexa-server $VERSION"

@@ -107,13 +107,14 @@ if [[ $FAMILY == debian ]]; then
     server) "$ROOT/scripts/build-deb.sh" --server ;;
     *) "$ROOT/scripts/build-deb.sh" ;;
   esac
-  version="$(sed -n 's/^const Version = "\(.*\)"$/\1/p' "$ROOT/server/internal/api/api.go")"
+  version="$(cat "$ROOT/dist/.version")"
   debarch="$(dpkg --print-architecture)"
   pkgs=()
   if [[ $WHAT != client ]]; then pkgs+=("$ROOT/dist/ipvexa-server_${version}_${debarch}.deb"); stop_dev_server; fi
   if [[ $WHAT != server ]]; then pkgs+=("$ROOT/dist/ipvexa_${version}_${debarch}.deb"); fi
   say "Installing packages (sudo)"
-  sudo apt-get install -y "${pkgs[@]}"
+  # --reinstall: also replaces a package built from the same commit.
+  sudo apt-get install -y --reinstall "${pkgs[@]}"
 else
   say "Installing build tools (sudo)"
   sudo pacman -S --needed --noconfirm base-devel git go cmake ninja qt6-base qt6-declarative qt6-multimedia ffmpeg
@@ -186,4 +187,7 @@ if [[ $WHAT != client ]]; then
 fi
 if [[ $WHAT != server ]]; then
   echo "    Desktop app: open \"IPvexa\" from the app menu, or run: ipvexa"
+  if pgrep -x ipvexa >/dev/null; then
+    warn "IPvexa is still open with the old version: close it and open it again"
+  fi
 fi
