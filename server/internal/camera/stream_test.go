@@ -1,6 +1,9 @@
 package camera
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestHideLogins(t *testing.T) {
 	in := "[in#0 @ 0x1] Error opening input: rtsp://admin:s3cr%40t@192.168.1.64:554/cam/realmonitor?channel=1: Connection timed out"
@@ -53,5 +56,20 @@ func TestRecordingAudio(t *testing.T) {
 	}
 	if has(sub.Args(), "0:a:0?") || has(sub.Args(), "aac") {
 		t.Error("substream recordings should not map audio")
+	}
+}
+
+func TestMotionArgsGPU(t *testing.T) {
+	cpu := strings.Join(motionArgs(false), " ")
+	gpu := strings.Join(motionArgs(true), " ")
+	if strings.Contains(cpu, "cuda") {
+		t.Error("CPU analyser must not ask for the GPU")
+	}
+	// The hardware options must come before the input, and frames are dropped
+	// (fps) before they are copied back from the GPU.
+	if !strings.Contains(gpu, "-hwaccel cuda -hwaccel_output_format cuda") ||
+		strings.Index(gpu, "-hwaccel") > strings.Index(gpu, "-i pipe:0") ||
+		strings.Index(gpu, "fps=") > strings.Index(gpu, "hwdownload") {
+		t.Errorf("GPU args: %s", gpu)
 	}
 }

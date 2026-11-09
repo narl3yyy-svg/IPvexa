@@ -187,7 +187,7 @@ AppDialog {
             Layout.fillWidth: true
             tabs: ["General", "Streams", "PTZ", "Motion", "Recording"]
             current: root.page
-            onCurrentChanged: root.page = current
+            onSelected: index => root.page = index
         }
 
         StackLayout {

@@ -6,10 +6,12 @@
 #include <QJsonObject>
 #include <QElapsedTimer>
 #include <QLibrary>
+#include <QAbstractVideoBuffer>
 #include <QVideoFrameFormat>
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <memory>
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -90,6 +92,35 @@ bool sleepInterruptible(VideoPlayer *p, int gen, int clockGen, int ms)
     return true;
 }
 
+// Hands a decoded frame's own memory to Qt instead of copying it: Qt uploads it
+// to the GPU straight from FFmpeg's buffer (a 4K frame is 12 MB, so this saves a
+// full copy per frame). The buffer holds a reference, so the decoder can't reuse
+// the memory until Qt is done with the frame.
+class AvFrameBuffer : public QAbstractVideoBuffer
+{
+public:
+    AvFrameBuffer(AVFrame *f, const QVideoFrameFormat &fmt, int planes) : m_frame(f), m_fmt(fmt), m_planes(planes) {}
+    ~AvFrameBuffer() override { av_frame_free(&m_frame); }
+    MapData map(QVideoFrame::MapMode) override
+    {
+        MapData d;
+        d.planeCount = m_planes;
+        for (int i = 0; i < m_planes; ++i) {
+            const int h = i == 0 ? m_frame->height : (m_frame->height + 1) / 2;
+            d.bytesPerLine[i] = m_frame->linesize[i];
+            d.data[i] = m_frame->data[i];
+            d.dataSize[i] = m_frame->linesize[i] * h;
+        }
+        return d;
+    }
+    QVideoFrameFormat format() const override { return m_fmt; }
+
+private:
+    AVFrame *m_frame;
+    QVideoFrameFormat m_fmt;
+    int m_planes;
+};
+
 // Convert a decoded (software) frame to a QVideoFrame without changing pixel layout when possible.
 class FrameConverter
 {
@@ -115,6 +146,12 @@ public:
         const bool full = f->color_range == AVCOL_RANGE_JPEG || f->format == AV_PIX_FMT_YUVJ420P;
         fmt.setColorRange(full ? QVideoFrameFormat::ColorRange_Full : QVideoFrameFormat::ColorRange_Video);
         fmt.setColorSpace(f->height >= 720 ? QVideoFrameFormat::ColorSpace_BT709 : QVideoFrameFormat::ColorSpace_BT601);
+        const int nplanes = qfmt == QVideoFrameFormat::Format_YUV420P ? 3 : 2;
+        if (src == f && f->buf[0] && f->linesize[0] > 0 && f->linesize[1] > 0 && (nplanes == 2 || f->linesize[2] > 0)) {
+            AVFrame *ref = av_frame_clone(f); // shares the data, no copy
+            if (ref)
+                return QVideoFrame(std::make_unique<AvFrameBuffer>(ref, fmt, nplanes));
+        }
         QVideoFrame vf(fmt);
         if (!vf.map(QVideoFrame::WriteOnly))
             return {};

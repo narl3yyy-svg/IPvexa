@@ -88,6 +88,9 @@ func main() {
 	defer stop()
 
 	mgr := &camera.Manager{Store: db, RecRoot: *recDir, FFmpeg: *ffmpeg, FFprobe: *ffprobe}
+	if mgr.GPU = camera.DetectGPU(*ffmpeg); mgr.GPU {
+		slog.Info("NVIDIA GPU found: motion detection decodes video on the GPU")
+	}
 	if p := db.Server(*minFree).RecordPath; p != "" {
 		if err := camera.CheckRoot(p); err != nil {
 			slog.Error("recordings folder from the settings is not usable; recording to the default folder", "dir", p, "err", err)

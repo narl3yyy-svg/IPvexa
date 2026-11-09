@@ -7,6 +7,9 @@ Item {
     id: root
     property var tabs: []           // list of labels
     property int current: 0
+    // Clicking a tab only reports it; the owner sets current, so a binding to it
+    // keeps working (e.g. a dialog going back to its first tab when reopened).
+    signal selected(int index)
     implicitHeight: 38
     implicitWidth: row.implicitWidth
 
@@ -38,7 +41,7 @@ Item {
                     color: Theme.accent
                     visible: index === root.current
                 }
-                MouseArea { id: ma; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: root.current = index }
+                MouseArea { id: ma; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: root.selected(index) }
             }
         }
     }

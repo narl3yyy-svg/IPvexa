@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"os/exec"
 	"time"
 
@@ -40,8 +41,11 @@ func (m *Manager) runMotion(ctx context.Context, r *running) {
 
 	// Debug statistics, logged once a minute.
 	frames, peak, statAt := 0, 0.0, time.Now()
+	gpu := m.GPU
 	for ctx.Err() == nil {
-		err := m.analyse(ctx, hub, func(frame []byte) {
+		got := 0
+		err := m.analyse(ctx, hub, gpu, func(frame []byte) {
+			got++
 			now := time.Now().UnixMilli()
 			res := det.Feed(frame)
 			frames++
@@ -67,6 +71,12 @@ func (m *Manager) runMotion(ctx context.Context, r *running) {
 		})
 		// The stream stopped or restarted: close any open event, then retry.
 		finish(tr.Flush())
+		if gpu && got == 0 && ctx.Err() == nil {
+			// e.g. a codec or size the GPU can't decode: use the CPU for this camera.
+			slog.Warn("motion: GPU decoding gave no frames, using the CPU", "camera", r.cam.ID, "err", err)
+			gpu = false
+			continue
+		}
 		if ctx.Err() != nil {
 			return
 		}
@@ -81,19 +91,31 @@ func (m *Manager) runMotion(ctx context.Context, r *running) {
 	}
 }
 
+// motionArgs returns the ffmpeg arguments that turn an MPEG-TS stream on stdin into
+// small greyscale frames on stdout. With gpu, the NVIDIA GPU decodes the video and
+// drops the frames that aren't analysed; only the analysed ones are copied back for
+// the (tiny) final resize. Decoding is the costly part, especially without a
+// substream, when the full-resolution stream is analysed.
+func motionArgs(gpu bool) []string {
+	a := []string{"-hide_banner", "-loglevel", "error", "-nostdin"}
+	vf := fmt.Sprintf("fps=%d,scale=%d:%d:flags=area,format=gray", motionFPS, motion.W, motion.H)
+	if gpu {
+		a = append(a, "-hwaccel", "cuda", "-hwaccel_output_format", "cuda")
+		vf = fmt.Sprintf("fps=%d,hwdownload,format=nv12|p010le,scale=%d:%d:flags=area,format=gray", motionFPS, motion.W, motion.H)
+	}
+	return append(a, "-probesize", "1000000", "-analyzeduration", "500000",
+		"-fflags", "+genpts+discardcorrupt", "-f", "mpegts", "-i", "pipe:0",
+		"-an", "-sn", "-threads", "1", "-vf", vf, "-f", "rawvideo", "pipe:1")
+}
+
 // analyse decodes the hub's stream into small greyscale frames and calls fn for each.
-func (m *Manager) analyse(ctx context.Context, hub *Hub, fn func([]byte)) error {
+func (m *Manager) analyse(ctx context.Context, hub *Hub, gpu bool, fn func([]byte)) error {
 	sub := hub.Subscribe()
 	defer sub.Close()
 
 	actx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	cmd := exec.CommandContext(actx, m.FFmpeg, "-hide_banner", "-loglevel", "error", "-nostdin",
-		"-probesize", "1000000", "-analyzeduration", "500000",
-		"-fflags", "+genpts+discardcorrupt", "-f", "mpegts", "-i", "pipe:0",
-		"-an", "-sn", "-threads", "1",
-		"-vf", fmt.Sprintf("fps=%d,scale=%d:%d:flags=area,format=gray", motionFPS, motion.W, motion.H),
-		"-f", "rawvideo", "pipe:1")
+	cmd := exec.CommandContext(actx, m.FFmpeg, motionArgs(gpu)...)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return err
@@ -134,6 +156,22 @@ func (m *Manager) analyse(ctx context.Context, hub *Hub, fn func([]byte)) error 
 	cancel()
 	cmd.Wait()
 	return readErr
+}
+
+// DetectGPU reports whether ffmpeg can use an NVIDIA GPU (NVDEC) for decoding.
+// Set IPVEXA_NO_HWDEC=1 to always use the CPU.
+func DetectGPU(ffmpeg string) bool {
+	if os.Getenv("IPVEXA_NO_HWDEC") != "" {
+		return false
+	}
+	if _, err := os.Stat("/dev/nvidiactl"); err != nil {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	err := exec.CommandContext(ctx, ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin",
+		"-init_hw_device", "cuda=gpu", "-f", "lavfi", "-i", "color=s=64x64", "-frames:v", "1", "-f", "null", "-").Run()
+	return err == nil
 }
 
 // emit passes an event to the listener (notifications), if any.

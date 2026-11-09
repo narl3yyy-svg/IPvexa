@@ -72,6 +72,20 @@
   .events .k { font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 3px; margin-right: 6px; }
   .k.motion { background: #e5484d; } .k.bookmark { background: var(--warn); color: #000; }
   .empty { color: var(--faint); padding: 10px 14px; font-size: 13px; }
+
+  /* Full screen: only the video, nothing else. Names show while the pointer is over a camera. */
+  body.fs header, body.fs .controls, body.fs h3, body.fs .events { display: none !important; }
+  body.fs, body.fs #app { background: #000; }
+  body.fs #grid { height: 100vh; height: 100dvh; padding: 0; gap: 2px;
+                  grid-template-columns: repeat(var(--cols), 1fr); grid-template-rows: repeat(var(--rows), 1fr); }
+  body.fs .tile { aspect-ratio: auto; border: 0; border-radius: 0; min-height: 0; }
+  body.fs .tile .name, body.fs .player .stamp { opacity: 0; transition: opacity .15s; }
+  body.fs .tile:hover .name, body.fs .player:hover .stamp { opacity: 1; }
+  body.fs #view { padding: 0; }
+  body.fs .player { height: 100vh; height: 100dvh; max-height: none; aspect-ratio: auto; }
+  #fsExit { position: fixed; top: 12px; right: 12px; z-index: 20; background: #000b; border-color: #fff3; color: #fff;
+            opacity: 0; pointer-events: none; transition: opacity .2s; }
+  body.fs #fsExit.show { opacity: 1; pointer-events: auto; }
 </style>
 </head>
 <body>
@@ -93,8 +107,10 @@
     <div class="logo"></div><div class="brand" id="title">IPvexa</div>
     <div class="spacer"></div>
     <span class="user" id="who"></span>
+    <button class="ghost" id="fs" title="Full screen: show only the cameras">⛶ Full screen</button>
     <button class="ghost" id="logout">Sign out</button>
   </header>
+  <button id="fsExit" class="hidden">✕ Exit full screen</button>
   <main id="grid"></main>
   <main id="view" class="hidden">
     <div class="player"><img id="stream" alt=""><video id="video" class="hidden" muted playsinline autoplay></video><div class="stamp live" id="stamp">LIVE</div></div>
@@ -172,6 +188,10 @@ function showGrid() {
     return `<div class="tile" data-id="${c.id}"><img alt="" data-id="${c.id}"><div class="msg">${c.enabled ? "Loading…" : "Disabled"}</div>
       <div class="name"><span class="dot ${st === "online" ? "on" : "off"}"></span>${esc(c.name)}${c.status && c.status.motion ? '<span class="badge">MOTION</span>' : ""}</div></div>`;
   }).join("");
+  // In full screen the cameras fill the screen in a near-square grid.
+  const cols = Math.ceil(Math.sqrt(S.cams.length));
+  g.style.setProperty("--cols", cols);
+  g.style.setProperty("--rows", Math.ceil(S.cams.length / cols));
   g.querySelectorAll(".tile").forEach((t) => (t.onclick = () => { location.hash = "camera=" + t.dataset.id; }));
   const refresh = async () => {
     try { await loadCams(); } catch (e) { return; }
@@ -292,6 +312,34 @@ function route() {
 }
 window.addEventListener("hashchange", () => { if (S.token && S.me) route(); });
 $("back").onclick = () => { location.hash = ""; };
+
+// ---------- Full screen ----------
+// Hides everything but the video. Uses the browser's full screen where it exists
+// (not on iPhone, where the page just drops its controls). Esc or the button that
+// appears when the pointer moves leaves it.
+let fsHideTimer = 0;
+function setFullscreen(on) {
+  document.body.classList.toggle("fs", on);
+  $("fsExit").classList.toggle("hidden", !on);
+  const el = document.documentElement;
+  if (on && !document.fullscreenElement && el.requestFullscreen) el.requestFullscreen().catch(() => {});
+  else if (on && el.webkitRequestFullscreen && !document.webkitFullscreenElement) el.webkitRequestFullscreen();
+  if (!on && document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  else if (!on && document.webkitFullscreenElement) document.webkitExitFullscreen();
+}
+$("fs").onclick = () => setFullscreen(true);
+$("fsExit").onclick = (e) => { e.stopPropagation(); setFullscreen(false); };
+const fsChanged = () => { if (!document.fullscreenElement && !document.webkitFullscreenElement && document.body.classList.contains("fs")) setFullscreen(false); };
+document.addEventListener("fullscreenchange", fsChanged);
+document.addEventListener("webkitfullscreenchange", fsChanged);
+const fsPoke = () => {
+  if (!document.body.classList.contains("fs")) return;
+  $("fsExit").classList.add("show");
+  clearTimeout(fsHideTimer);
+  fsHideTimer = setTimeout(() => $("fsExit").classList.remove("show"), 2500);
+};
+document.addEventListener("mousemove", fsPoke);
+document.addEventListener("touchstart", fsPoke, { passive: true });
 document.addEventListener("visibilitychange", () => {
   // Don't stream in the background (saves battery and data).
   if (document.hidden) stopStreams(); else if (S.me) route();

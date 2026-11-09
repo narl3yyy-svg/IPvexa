@@ -25,6 +25,8 @@ type Manager struct {
 	ActiveRoot string
 	FFmpeg     string
 	FFprobe    string
+	// GPU: decode with the NVIDIA GPU where the server decodes video (motion detection).
+	GPU bool
 	// OnEvent is called when a motion event starts (started=true) and when it ends.
 	OnEvent func(e store.Event, started bool)
 

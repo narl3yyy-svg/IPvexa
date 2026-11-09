@@ -71,7 +71,7 @@ AppDialog {
             Layout.fillWidth: true
             tabs: ["Phone setup", "Alert rules"]
             current: root.page
-            onCurrentChanged: root.page = current
+            onSelected: index => root.page = index
         }
 
         // ---------------- Phone setup ----------------
