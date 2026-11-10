@@ -31,6 +31,7 @@ AppDialog {
         capOn.checked = d.max_storage_gb > 0
         cap.value = d.max_storage_gb > 0 ? Math.round(d.max_storage_gb) : Math.max(1, Math.round((d.disk.total || 0) / 1073741824 * 0.8))
         eventDays.value = d.event_days
+        timeSync.checked = !d.time_sync_off
     }
     onOpened: {
         status = ""
@@ -50,7 +51,8 @@ AppDialog {
             motion_pad_sec: pad.value,
             min_free_pct: minFree.value,
             max_storage_gb: capOn.checked ? cap.value : 0,
-            event_days: eventDays.value
+            event_days: eventDays.value,
+            time_sync_off: !timeSync.checked
         }, function (err, d) {
             saving = false
             statusError = !!err
@@ -156,6 +158,26 @@ AppDialog {
                 SpinBox { id: eventDays; from: 1; to: 3650; value: 90; editable: true; Layout.preferredWidth: 110 }
                 Text { text: "days (bookmarks are kept until deleted)"; color: Theme.textDim; font.pixelSize: 12 }
             }
+        }
+        Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: Theme.border }
+
+        // ---------------- Camera clocks ----------------
+        Text { text: "CAMERA CLOCKS"; color: Theme.textFaint; font.pixelSize: 10; font.weight: Font.Bold; font.letterSpacing: 1 }
+        Switch { id: timeSync; text: "Keep camera clocks on this server's time" }
+        Text {
+            readonly property var ts: root.info ? root.info.time_server : null
+            Layout.fillWidth: true
+            Layout.preferredWidth: 100
+            visible: timeSync.checked
+            wrapMode: Text.Wrap
+            textFormat: Text.StyledText
+            color: Theme.textFaint; font.pixelSize: 11
+            text: !ts ? "" : ts.running
+                  ? "This server is a time server (NTP, port 123). In each camera's Date & Time settings, set the NTP server to <b>"
+                    + (ts.addresses && ts.addresses.length ? ts.addresses.join("</b> or <b>") : "this server's address")
+                    + "</b> (port 123). Clocks are also checked every 30 minutes and set directly if they are 2 s or more off."
+                    + (ts.served ? " Time requests answered: " + ts.served + "." : "")
+                  : "The time server could not start (" + (ts.error || "unknown error") + "). Clocks are still checked every 30 minutes and set directly when they are 2 s or more off."
         }
         Text {
             Layout.fillWidth: true

@@ -49,6 +49,8 @@ type ServerSettings struct {
 	MotionPadSec int `json:"motion_pad_sec"`
 	// RetentionDays is how long new cameras keep footage by default.
 	RetentionDays int `json:"retention_days"`
+	// TimeSyncOff stops the server keeping the cameras' clocks on its time.
+	TimeSyncOff bool `json:"time_sync_off"`
 }
 
 // Server returns the server settings with defaults filled in.

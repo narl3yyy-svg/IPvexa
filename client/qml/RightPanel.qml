@@ -379,6 +379,19 @@ Rectangle {
                                       + (m ? " · " + (m.viewers || 0) + " viewers · " + (m.restarts || 0) + " reconnects" : "")
                                 color: Theme.textFaint; font.pixelSize: 10
                             }
+                            // The camera's clock, as last checked by the server (every 30 min).
+                            Text {
+                                readonly property var ck: modelData.clock
+                                visible: !!ck
+                                width: parent.width
+                                elide: Text.ElideRight
+                                text: !ck ? "" : ck.error ? "Clock: " + ck.error
+                                      : "Clock " + (Math.abs(ck.offset_ms) < 1000 ? "in step" : (ck.offset_ms > 0 ? "+" : "") + (ck.offset_ms / 1000).toFixed(1) + " s")
+                                        + (ck.uses_server ? " · time from this server" : ck.ntp_server ? " · NTP " + ck.ntp_server : " · set by hand")
+                                        + (ck.corrected_at && Date.now() - ck.corrected_at < 86400000 ? " · corrected " + new Date(ck.corrected_at).toLocaleTimeString(Qt.locale(), "HH:mm") : "")
+                                color: ck && (ck.error || Math.abs(ck.offset_ms) >= 2000) ? Theme.warn : Theme.textFaint
+                                font.pixelSize: 10
+                            }
                             Text {
                                 visible: !!(m && Theme.cameraState(modelData) === "offline" && m.last_error)
                                 width: parent.width

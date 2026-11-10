@@ -25,6 +25,7 @@ import (
 	"ipvexa/internal/notify"
 	"ipvexa/internal/storage"
 	"ipvexa/internal/store"
+	"ipvexa/internal/timesync"
 )
 
 func defaultDataDir() string {
@@ -46,6 +47,7 @@ func main() {
 	ffprobe := flag.String("ffprobe", "ffprobe", "path to ffprobe")
 	minFree := flag.Float64("min-free", 10, "minimum free disk space (percent) before oldest footage is deleted")
 	debug := flag.Bool("debug", false, "verbose logging")
+	ntpListen := flag.String("ntp-listen", ":123", "address for the cameras' time server (NTP); empty to turn it off")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage:\n  ipvexa-server [flags]\n  ipvexa-server [flags] passwd <username>   set a user's password (creates an admin if missing)\n\nFlags:\n")
 		flag.PrintDefaults()
@@ -102,6 +104,14 @@ func main() {
 	thumbDir := filepath.Join(*dataDir, "thumbs")
 	apiServer := &api.Server{Store: db, Cams: mgr, RecRoot: *recDir, DataDir: *dataDir, FFmpeg: *ffmpeg, MinFreePct: *minFree,
 		Notify: notifier, ThumbDir: thumbDir}
+	timeSyncOn := func() bool { return !db.Server(*minFree).TimeSyncOff }
+	var ntpSrv *timesync.NTPServer
+	if *ntpListen != "" {
+		ntpSrv = &timesync.NTPServer{Addr: *ntpListen, Enabled: timeSyncOn}
+		go ntpSrv.Run(ctx)
+	}
+	apiServer.Clocks = &timesync.Syncer{Store: db, Target: api.ControlTarget, Enabled: timeSyncOn, NTP: ntpSrv}
+	go apiServer.Clocks.Run(ctx)
 	notifier.Snapshot = func(ctx context.Context, camID int64) ([]byte, error) { return apiServer.LiveJPEG(ctx, camID, "sub") }
 	camName := func(id int64) string {
 		if c, err := db.Camera(id); err == nil {

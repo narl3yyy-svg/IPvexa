@@ -23,6 +23,7 @@ import (
 	"ipvexa/internal/notify"
 	"ipvexa/internal/storage"
 	"ipvexa/internal/store"
+	"ipvexa/internal/timesync"
 	"ipvexa/internal/web"
 )
 
@@ -39,6 +40,8 @@ type Server struct {
 	Notify     *notify.Notifier // optional
 	// ThumbDir holds event thumbnails (optional).
 	ThumbDir string
+	// Clocks keeps the cameras' clocks on the server's time (optional).
+	Clocks *timesync.Syncer
 
 	ptz ptzHub
 }
@@ -276,7 +279,8 @@ var startTime = time.Now()
 
 type cameraView struct {
 	store.Camera
-	Status camera.CameraStatus `json:"status"`
+	Status camera.CameraStatus   `json:"status"`
+	Clock  *timesync.CameraClock `json:"clock,omitempty"`
 }
 
 func (s *Server) listCameras(w http.ResponseWriter, r *http.Request) {
@@ -296,7 +300,11 @@ func (s *Server) listCameras(w http.ResponseWriter, r *http.Request) {
 		if !admin {
 			c.MainURL, c.SubURL = redact(c.MainURL), redact(c.SubURL)
 		}
-		out = append(out, cameraView{c, s.Cams.Status(c.ID)})
+		v := cameraView{Camera: c, Status: s.Cams.Status(c.ID)}
+		if s.Clocks != nil {
+			v.Clock = s.Clocks.Status(c.ID)
+		}
+		out = append(out, v)
 	}
 	writeJSON(w, 200, out)
 }
@@ -334,7 +342,11 @@ func (s *Server) getCamera(w http.ResponseWriter, r *http.Request) {
 		c.MainURL, c.SubURL = redact(c.MainURL), redact(c.SubURL)
 	}
 	c.OnvifPass = ""
-	writeJSON(w, 200, cameraView{c, s.Cams.Status(c.ID)})
+	v := cameraView{Camera: c, Status: s.Cams.Status(c.ID)}
+	if s.Clocks != nil {
+		v.Clock = s.Clocks.Status(c.ID)
+	}
+	writeJSON(w, 200, v)
 }
 
 func normalize(c *store.Camera) error {

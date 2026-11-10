@@ -133,6 +133,11 @@ func (h *ptzHub) invalidate(id int64) {
 	}
 }
 
+// ControlTarget gives the camera's host, ONVIF port and login (also used for clock sync).
+func ControlTarget(c store.Camera) (host string, port int, user, pass string, err error) {
+	return ptzTarget(c)
+}
+
 // ptzTarget works out the camera's host, control port and login.
 func ptzTarget(c store.Camera) (host string, port int, user, pass string, err error) {
 	u, perr := url.Parse(c.MainURL)

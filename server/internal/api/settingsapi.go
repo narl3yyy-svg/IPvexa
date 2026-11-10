@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -21,6 +22,28 @@ type settingsView struct {
 	Disk          storage.DiskUsage `json:"disk"`
 	FootageBytes  int64             `json:"footage_bytes"`
 	Version       string            `json:"version"`
+	TimeServer    *timeServerView   `json:"time_server,omitempty"`
+}
+
+// timeServerView reports the server's time service for cameras.
+type timeServerView struct {
+	Running bool   `json:"running"`
+	Error   string `json:"error,omitempty"`
+	Served  int    `json:"served"` // time requests answered since the server started
+	// Addresses are this server's IPv4 addresses: what to enter as the NTP server
+	// in each camera's settings.
+	Addresses []string `json:"addresses"`
+}
+
+func localIPv4s() []string {
+	var out []string
+	addrs, _ := net.InterfaceAddrs()
+	for _, a := range addrs {
+		if n, ok := a.(*net.IPNet); ok && n.IP.To4() != nil && !n.IP.IsLoopback() && !n.IP.IsLinkLocalUnicast() {
+			out = append(out, n.IP.String())
+		}
+	}
+	return out
 }
 
 func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
@@ -28,7 +51,15 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 	du, _ := storage.Usage(root)
 	total, _ := s.Store.TotalFootageBytes()
 	writeJSON(w, 200, settingsView{ServerSettings: s.Store.Server(s.MinFreePct), RecordingsDir: root, DefaultDir: s.RecRoot,
-		DataDir: s.DataDir, Disk: du, FootageBytes: total, Version: Version})
+		DataDir: s.DataDir, Disk: du, FootageBytes: total, Version: Version, TimeServer: s.timeServer()})
+}
+
+func (s *Server) timeServer() *timeServerView {
+	if s.Clocks == nil || s.Clocks.NTP == nil {
+		return nil
+	}
+	running, err, served := s.Clocks.NTP.Status()
+	return &timeServerView{Running: running, Error: err, Served: served, Addresses: localIPv4s()}
 }
 
 func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
@@ -90,6 +121,9 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, 500, err.Error())
 			return
 		}
+	}
+	if s.Clocks != nil && !v.TimeSyncOff {
+		s.Clocks.Kick()
 	}
 	s.audit(r, "settings.update", fmt.Sprintf("min free %.0f%%, cap %.0f GB, events %d days, folder %s, motion buffer %d s, default retention %d days",
 		v.MinFreePct, v.MaxStorageGB, v.EventDays, target, v.MotionPadSec, v.RetentionDays))
