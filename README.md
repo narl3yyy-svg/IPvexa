@@ -69,7 +69,7 @@ App options for testing and support: `--seek <minutes>` starts in playback that 
 
 ## Phones and browsers
 
-- **Web view:** open `http://<server>:7480` in any browser. It has a camera grid, live view, playback and the event list, and needs no app or plugin. Video plays at full quality where the browser supports the camera's codec (H.264 everywhere, H.265 on many phones); otherwise it falls back to a lighter picture stream. SD/HD switches between the substream and the main stream. **⛶ Full screen** at the top shows only the cameras, filling the screen; move the mouse or tap to get the exit button, or press Esc.
+- **Web view:** open `http://<server>:7480` in any browser. It has a camera grid, live view, playback and the event list, and needs no app or plugin. Video plays at full quality where the browser supports the camera's codec (H.264 everywhere, H.265 on many phones); otherwise it falls back to a lighter picture stream. SD/HD switches between the substream and the main stream. Live view runs indefinitely: if the stream is interrupted (a camera reconnecting, a Wi-Fi drop) the page notices within seconds and reconnects by itself, and it renews the connection every 30 minutes without a visible gap. **⛶ Full screen** at the top shows only the cameras, filling the screen; move the mouse or tap to get the exit button, or press Esc.
 - **Alerts:** user menu > **Phone notifications** shows the steps for the ntfy app and lets you set rules: motion, camera offline/online or disk almost full, for chosen cameras, days and hours, with cooldowns, optional bookmarks and webhooks (e.g. Home Assistant). Alerts include a snapshot, and tapping one opens the web view at that moment.
 
 ## Remote access

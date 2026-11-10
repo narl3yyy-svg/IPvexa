@@ -54,6 +54,8 @@
   #view { padding: 0 0 20px; }
   .player { position: relative; background: #000; aspect-ratio: 16/9; max-height: 70vh; width: 100%; }
   .player img, .player video { width: 100%; height: 100%; object-fit: contain; display: block; background: #000; }
+  /* A new connection loads out of sight and replaces the shown one once it plays. */
+  .player .incoming { position: absolute; inset: 0; opacity: 0; pointer-events: none; }
   .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
   .seg button { border: 0; border-radius: 0; background: transparent; padding: 8px 12px; color: var(--dim); }
   .seg button.on { background: #153a4d; color: var(--accent); }
@@ -211,13 +213,28 @@ function showGrid() {
   gridTimer = setInterval(refresh, 4000);
 }
 
-// ---------- Single camera: MJPEG live or playback ----------
-let clockTimer = 0;
+// ---------- Single camera: native video (fMP4) or MJPEG, live or playback ----------
+// A stream is one long HTTP response. Anything that ends it (the camera
+// reconnecting, a Wi-Fi drop, the server dropping a viewer that fell behind) would
+// leave the last picture frozen, so a watchdog notices within seconds and
+// reconnects, and live video also gets a fresh connection every 30 minutes. A new
+// connection loads out of sight and replaces the shown one once it plays: no gap.
+let clockTimer = 0, watchTimer = 0, playGen = 0;
+const REFRESH_MS = 30 * 60000, STALL_MS = 6000, CONNECT_MS = 15000;
+
+function closeMedia(el) {
+  if (!el) return;
+  el.onload = el.onerror = el.onplaying = el.onended = null;
+  if (el.tagName === "VIDEO") { el.pause(); el.removeAttribute("src"); el.load(); }
+  else el.removeAttribute("src"); // closes the connection
+}
 function stopStreams() {
   clearInterval(gridTimer); gridTimer = 0;
   clearInterval(clockTimer); clockTimer = 0;
-  const img = $("stream"); if (img) img.removeAttribute("src"); // closes the connection
-  const v = $("video"); if (v) { v.pause(); v.removeAttribute("src"); v.load(); }
+  clearInterval(watchTimer); watchTimer = 0;
+  playGen++; // cancels pending retries of the previous stream
+  closeMedia($("stream")); closeMedia($("video"));
+  document.querySelectorAll(".player .incoming").forEach((el) => { closeMedia(el); el.remove(); });
 }
 
 // Can this browser play the camera's stream natively (full frame rate)? If not, MJPEG.
@@ -244,37 +261,126 @@ function showCamera(id, t) {
   loadEvents();
 }
 
+// A short fingerprint of what an <img> shows (a 32×18 copy's pixels).
+const sigCanvas = document.createElement("canvas");
+sigCanvas.width = 32; sigCanvas.height = 18;
+function pictureSig(img) {
+  try {
+    if (!img || !img.naturalWidth) return "";
+    const g = sigCanvas.getContext("2d", { willReadFrequently: true });
+    g.drawImage(img, 0, 0, 32, 18);
+    const d = g.getImageData(0, 0, 32, 18).data;
+    let h = 0;
+    for (let i = 0; i < d.length; i++) h = (h * 31 + d[i]) | 0;
+    return String(h);
+  } catch (e) { return String(Date.now()); } // can't read it: never call it frozen
+}
+
 function play(t, forceMjpeg) {
-  const img = $("stream"), video = $("video"), stamp = $("stamp");
+  const stamp = $("stamp");
   stopStreams();
+  const gen = playGen;
   const recorded = t > 0 && t < Date.now() - 2000;
   // Recordings are of the main stream; live uses the substream unless HD is on.
   const stream = recorded || S.hd ? "main" : "sub";
   const useVideo = !forceMjpeg && nativeVideo(stream);
-  const q = recorded ? `t=${Math.round(t)}` : `stream=${stream}`;
-  img.classList.toggle("hidden", useVideo); video.classList.toggle("hidden", !useVideo);
-  if (useVideo) {
-    video.src = withToken(`/api/cameras/${S.cam.id}/fmp4?${q}`);
-    video.play().catch(() => {});
-    video.onerror = () => play(t, true); // fall back to MJPEG
-  } else {
-    img.src = withToken(`/api/cameras/${S.cam.id}/mjpeg?${q}&w=${S.hd ? 1280 : 640}&fps=${S.hd ? 10 : 8}`);
-    img.onerror = () => { stamp.textContent = recorded ? "No recording at this time" : "Camera unavailable"; };
-  }
+  $("stream").classList.toggle("hidden", useVideo); $("video").classList.toggle("hidden", !useVideo);
+  const src = (from) => {
+    const q = recorded ? `t=${Math.round(from)}` : `stream=${stream}`;
+    return withToken(useVideo ? `/api/cameras/${S.cam.id}/fmp4?${q}`
+      : `/api/cameras/${S.cam.id}/mjpeg?${q}&w=${S.hd ? 1280 : 640}&fps=${S.hd ? 10 : 8}`);
+  };
+  const label = () => (recorded ? fmt(position(), true) : "LIVE");
+
+  let everPlayed = false, retries = 0, retryTimer = 0;
+  let pending = null, pendingAt = 0, connectedAt = 0, lastT = -1, lastMove = Date.now(), lastSample = 0, lastSig = "";
+  const scheduleRetry = () => {
+    if (gen !== playGen || retryTimer) return;
+    retries++;
+    if (!recorded) stamp.textContent = "Reconnecting…";
+    retryTimer = setTimeout(() => { retryTimer = 0; connect(recorded ? position() : 0); },
+      Math.min(1000 * 2 ** Math.min(retries - 1, 4), 15000));
+  };
+  const connect = (from) => {
+    if (gen !== playGen) return;
+    if (pending) { closeMedia(pending); pending.remove(); }
+    const shown = $(useVideo ? "video" : "stream");
+    const el = document.createElement(useVideo ? "video" : "img");
+    el.className = "incoming";
+    el.alt = "";
+    if (useVideo) { el.muted = true; el.setAttribute("muted", ""); el.setAttribute("playsinline", ""); el.autoplay = true; }
+    const ready = () => {
+      if (gen !== playGen || pending !== el) return;
+      pending = null;
+      closeMedia(shown); shown.remove();
+      el.className = ""; el.id = useVideo ? "video" : "stream";
+      el.onerror = failed;
+      if (useVideo) el.onended = failed;
+      everPlayed = true; retries = 0;
+      connectedAt = lastMove = Date.now(); lastT = -1;
+      if (recorded) { S.playFrom = from; S.playStartedAt = Date.now(); }
+      stamp.textContent = label();
+    };
+    const failed = () => {
+      if (gen !== playGen) return;
+      // A browser that can't play this codec at all: use the picture stream.
+      if (useVideo && !everPlayed && el.error && el.error.code === 4) { play(t, true); return; }
+      if (pending === el) { pending = null; closeMedia(el); el.remove(); }
+      else if (!recorded) stamp.textContent = "Reconnecting…";
+      if (!everPlayed && retries >= 2) stamp.textContent = recorded ? "No recording at this time" : "Camera unavailable — retrying";
+      scheduleRetry();
+    };
+    if (useVideo) { el.onplaying = ready; el.onerror = failed; el.onended = failed; }
+    else {
+      el.onload = ready; el.onerror = failed; // load = first picture arrived
+      setTimeout(() => { if (pending === el && el.naturalWidth > 0) ready(); }, 4000);
+    }
+    pending = el; pendingAt = Date.now();
+    shown.parentNode.insertBefore(el, shown);
+    el.src = src(from);
+    if (useVideo) el.play().catch(() => {});
+  };
+
   if (recorded) {
     S.playFrom = t; S.playStartedAt = Date.now();
     stamp.className = "stamp rec"; $("liveBtn").classList.remove("on");
-    const tick = () => { stamp.textContent = fmt(S.playFrom + (Date.now() - S.playStartedAt), true); };
-    tick(); clockTimer = setInterval(tick, 500);
+    clockTimer = setInterval(() => { if (!pending && !retryTimer) stamp.textContent = label(); }, 500);
   } else {
     S.playFrom = 0;
-    stamp.className = "stamp live"; stamp.textContent = "LIVE"; $("liveBtn").classList.add("on");
-    // Stay near the live edge: progressive video otherwise drifts behind.
-    if (useVideo) clockTimer = setInterval(() => {
-      const b = video.buffered;
-      if (b.length && b.end(b.length - 1) - video.currentTime > 2.5) video.currentTime = b.end(b.length - 1) - 0.4;
-    }, 1000);
+    stamp.className = "stamp live"; $("liveBtn").classList.add("on");
   }
+  stamp.textContent = recorded ? label() : "LIVE";
+  connect(t);
+
+  watchTimer = setInterval(() => {
+    if (gen !== playGen || retryTimer) return;
+    if (pending) {
+      if (Date.now() - pendingAt > CONNECT_MS) { closeMedia(pending); pending.remove(); pending = null; scheduleRetry(); }
+      return;
+    }
+    if (useVideo) {
+      const v = $("video");
+      if (v.paused && !v.ended) v.play().catch(() => {});
+      if (v.currentTime !== lastT) { lastT = v.currentTime; lastMove = Date.now(); }
+      else if (Date.now() - lastMove > STALL_MS) { // picture stopped moving
+        lastMove = Date.now();
+        if (!recorded) stamp.textContent = "Reconnecting…";
+        connect(recorded ? position() : 0);
+        return;
+      }
+      // Stay near the live edge: progressive video otherwise drifts behind.
+      const b = v.buffered;
+      if (!recorded && b.length && b.end(b.length - 1) - v.currentTime > 2.5) v.currentTime = b.end(b.length - 1) - 0.4;
+    } else if (Date.now() - lastSample >= 3000) {
+      // A picture stream gives no sign when it stops: compare a small copy of the
+      // picture every 3 s; unchanged for 12 s means it froze.
+      lastSample = Date.now();
+      const sig = pictureSig($("stream"));
+      if (sig !== lastSig) { lastSig = sig; lastMove = Date.now(); }
+      else if (Date.now() - lastMove > 12000) { lastMove = Date.now(); connect(recorded ? position() : 0); return; }
+    }
+    if (!recorded && Date.now() - connectedAt > REFRESH_MS) { connectedAt = Date.now(); connect(0); }
+  }, 1000);
 }
 function setHD(on) {
   S.hd = on; localStorage.setItem("ipvexa_hd", on ? "1" : "0");
