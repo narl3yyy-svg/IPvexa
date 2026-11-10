@@ -15,7 +15,7 @@ qt_add_executable(ipvexa
     src/main.cpp
     src/ApiClient.h src/ApiClient.cpp
     src/PlaybackClock.h src/PlaybackClock.cpp
-    src/VideoPlayer.h src/VideoPlayer.cpp
+    src/VideoPlayer.h src/VideoPlayer.cpp src/LivePacer.h
 )
 
 target_include_directories(ipvexa PRIVATE src)
@@ -80,3 +80,7 @@ find_package(Qt6 REQUIRED COMPONENTS Qml)
 add_executable(layout_tests EXCLUDE_FROM_ALL tests/layout_tests.cpp)
 target_compile_definitions(layout_tests PRIVATE IPVEXA_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(layout_tests PRIVATE Qt6::Core Qt6::Qml)
+
+# Simulation of live pacing (catching up after pauses, drifting camera clocks):
+# cmake --build build --target pacer_tests && build/pacer_tests
+add_executable(pacer_tests EXCLUDE_FROM_ALL tests/pacer_tests.cpp)

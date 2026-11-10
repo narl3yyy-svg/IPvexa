@@ -1,6 +1,7 @@
 #include "VideoPlayer.h"
 #include "ApiClient.h"
 #include "PlaybackClock.h"
+#include "LivePacer.h"
 
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -8,7 +9,11 @@
 #include <QLibrary>
 #include <QAbstractVideoBuffer>
 #include <QVideoFrameFormat>
+#include <atomic>
 #include <chrono>
+#include <condition_variable>
+#include <deque>
+#include <mutex>
 #include <cmath>
 #include <cstring>
 #include <memory>
@@ -38,12 +43,13 @@ struct Interrupt {
     VideoPlayer *player;
     int gen;
     int clockGen; // -1 = don't watch the clock (live mode)
+    std::atomic<bool> abort{false}; // end the current session (stops the live reader)
 };
 
 int interruptCb(void *opaque)
 {
     auto *i = static_cast<Interrupt *>(opaque);
-    if (i->player->shouldStop(i->gen))
+    if (i->abort.load(std::memory_order_relaxed) || i->player->shouldStop(i->gen))
         return 1;
     if (i->clockGen >= 0 && PlaybackClock::instance()->generation() != i->clockGen)
         return 1;
@@ -228,49 +234,6 @@ bool fetchPlayInfo(const QString &url, Interrupt *intr, PlayInfo *out)
     return true;
 }
 
-// Smooths live video from cameras that deliver frames in bursts (typically Wi-Fi).
-// It learns the smallest delay between a frame's timestamp and its arrival (the
-// camera's best case) and shows each frame at timestamp + that delay + the buffer,
-// so frames bunched together by the network are spread out again. Late frames are
-// shown at once, so the delay never grows beyond the buffer.
-class LivePacer
-{
-public:
-    // How long to wait (ms) before showing a frame with this timestamp.
-    qint64 wait(double ptsMs, qint64 nowMs, int bufferMs)
-    {
-        const double offset = double(nowMs) - ptsMs;
-        if (m_start < 0) {
-            m_start = nowMs;
-            reset(offset, nowMs);
-        } else if (std::abs(offset - m_min) > 10000) {
-            reset(offset, nowMs); // the camera's timestamps jumped
-        }
-        m_min = std::min(m_min, offset);
-        m_windowMin = std::min(m_windowMin, offset);
-        if (nowMs - m_windowStart > 10000) { // follow slow clock drift
-            m_min = m_windowMin;
-            m_windowMin = offset;
-            m_windowStart = nowMs;
-        }
-        // The first moments are the server's cached frames: play through them.
-        if (bufferMs <= 0 || nowMs - m_start < 1500)
-            return 0;
-        const double due = ptsMs + m_min + bufferMs;
-        return due > double(nowMs) ? qint64(std::min(due - double(nowMs), double(bufferMs))) : 0;
-    }
-
-private:
-    void reset(double offset, qint64 nowMs)
-    {
-        m_min = m_windowMin = offset;
-        m_windowStart = nowMs;
-    }
-    qint64 m_start = -1;
-    double m_min = 0, m_windowMin = 0;
-    qint64 m_windowStart = 0;
-};
-
 // Sleep up to ms in small steps, returning false if the player is stopping.
 bool sleepFine(VideoPlayer *p, int gen, qint64 ms)
 {
@@ -296,6 +259,7 @@ SessionResult runSession(VideoPlayer *p, Interrupt *intr, const QString &url, bo
                          const PlayInfo *info, bool allowHw)
 {
     SessionResult res;
+    intr->abort = false;
     AVFormatContext *fmt = avformat_alloc_context();
     fmt->interrupt_callback = {interruptCb, intr};
     AVDictionary *opts = nullptr;
@@ -378,6 +342,7 @@ SessionResult runSession(VideoPlayer *p, Interrupt *intr, const QString &url, bo
     }
     if (live) {
         dec->flags |= AV_CODEC_FLAG_LOW_DELAY;
+        dec->flags |= AV_CODEC_FLAG_COPY_OPAQUE; // frames carry their packet's arrival time
         if (!hwDev)
             dec->thread_type = FF_THREAD_SLICE; // frame threading would add latency
     }
@@ -410,7 +375,9 @@ SessionResult runSession(VideoPlayer *p, Interrupt *intr, const QString &url, bo
         }
         if (live && f->best_effort_timestamp != AV_NOPTS_VALUE) {
             const double ptsMs = double(f->best_effort_timestamp) * tb * 1000.0;
-            const qint64 waitMs = pacer.wait(ptsMs, steady.elapsed(), p->liveBufferMs());
+            const qint64 now = steady.elapsed();
+            const qint64 arrived = f->opaque ? qint64(reinterpret_cast<intptr_t>(f->opaque)) : now;
+            const qint64 waitMs = pacer.wait(ptsMs, arrived, now, p->liveBufferMs());
             if (waitMs > 0 && !sleepFine(p, intr->gen, waitMs))
                 return false;
         }
@@ -458,8 +425,60 @@ SessionResult runSession(VideoPlayer *p, Interrupt *intr, const QString &url, bo
         return true;
     };
 
+    // Live: a reader thread takes packets off the network the moment they arrive and
+    // notes when, so the pacer knows real arrival times even while frames wait to be
+    // shown, and the server never sees a slow viewer.
+    struct {
+        std::mutex m;
+        std::condition_variable cv;
+        std::deque<AVPacket *> q;
+        bool done = false;
+    } lq;
+    std::thread reader;
+    if (live) {
+        reader = std::thread([&] {
+            for (;;) {
+                AVPacket *pk = av_packet_alloc();
+                if (!pk || av_read_frame(fmt, pk) < 0) {
+                    av_packet_free(&pk);
+                    break;
+                }
+                if (pk->stream_index != vs) {
+                    av_packet_free(&pk);
+                    continue;
+                }
+                pk->opaque = reinterpret_cast<void *>(intptr_t(steady.elapsed()));
+                std::lock_guard<std::mutex> l(lq.m);
+                lq.q.push_back(pk);
+                lq.cv.notify_one();
+            }
+            std::lock_guard<std::mutex> l(lq.m);
+            lq.done = true;
+            lq.cv.notify_one();
+        });
+    }
+    auto nextPacket = [&]() -> bool {
+        if (!live)
+            return av_read_frame(fmt, pkt) >= 0;
+        std::unique_lock<std::mutex> l(lq.m);
+        lq.cv.wait(l, [&] { return !lq.q.empty() || lq.done; });
+        if (lq.q.empty())
+            return false;
+        AVPacket *pk = lq.q.front();
+        lq.q.pop_front();
+        l.unlock();
+        // Decoding can't keep up at all (20 s behind): reconnect at real time instead.
+        if (steady.elapsed() - qint64(reinterpret_cast<intptr_t>(pk->opaque)) > 20000) {
+            av_packet_free(&pk);
+            return false;
+        }
+        av_packet_move_ref(pkt, pk);
+        av_packet_free(&pk);
+        return true;
+    };
+
     bool running = true;
-    while (running && av_read_frame(fmt, pkt) >= 0) {
+    while (running && nextPacket()) {
         if (pkt->stream_index == vs) {
             if (avcodec_send_packet(dec, pkt) < 0) {
                 if (++decodeErrors > 50 && hwDev) {
@@ -484,6 +503,12 @@ SessionResult runSession(VideoPlayer *p, Interrupt *intr, const QString &url, bo
             }
         }
         av_packet_unref(pkt);
+    }
+    if (reader.joinable()) {
+        intr->abort = true; // ends the reader's blocking read
+        reader.join();
+        for (AVPacket *pk : lq.q)
+            av_packet_free(&pk);
     }
     cleanup();
     return res;
