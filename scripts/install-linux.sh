@@ -128,6 +128,33 @@ else
   if [[ $WHAT != client ]]; then sudo systemctl enable --now ipvexa-server; fi
 fi
 
+# ---------------------------------------------------------------- object detector (AI)
+# Lets motion be limited to people and vehicles. Runs on this machine only.
+if [[ $WHAT != client ]]; then
+  say "Getting the object detector for AI motion filtering (people, vehicles)"
+  if ai="$("$ROOT/scripts/get-ai.sh")"; then
+    dir=/var/lib/ipvexa/ai
+    changed=0
+    sudo install -d -m 750 -o ipvexa -g ipvexa "$dir"
+    # Remove an older ONNX Runtime left by a previous version.
+    for t in "$dir"/libonnxruntime*; do
+      if [[ -e "$t" && ! -e "$ai/$(basename "$t")" ]]; then sudo rm -f "$t"; changed=1; fi
+    done
+    for f in "$ai"/*; do
+      t="$dir/$(basename "$f")"
+      if ! sudo cmp -s "$f" "$t"; then
+        sudo install -m 644 -o ipvexa -g ipvexa "$f" "$t"
+        changed=1
+      fi
+    done
+    if [[ $changed == 1 ]] && systemctl is-active --quiet ipvexa-server; then
+      sudo systemctl restart ipvexa-server
+    fi
+  else
+    warn "could not download the object detector (no internet?). Motion detection works as before, without the people/vehicle filter; run the installer again later to add it."
+  fi
+fi
+
 # ---------------------------------------------------------------- import a development setup
 if [[ $IMPORT == 1 && $WHAT != client ]]; then
   src="$HOME/.local/share/ipvexa"

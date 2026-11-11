@@ -6,7 +6,7 @@
 
 **Self-hosted video management for IP cameras. Private, offline, and fast.**
 
-Continuous and motion recording · native desktop app · synced multi-camera playback · web and phone access
+Continuous and motion recording · local AI person and vehicle detection · native desktop app · synced multi-camera playback · web and phone access
 
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
 ![Version](https://img.shields.io/badge/version-0.4.0-2fa8e0.svg)
@@ -33,6 +33,7 @@ Everything runs on your own hardware. IPvexa never contacts the internet: there 
 | **Live view** | Free-form layouts with resizable tiles, auto-arrange, digital zoom, tours and video walls on extra monitors. A distraction-free full-screen mode shows only the cameras. Live video stays in real time. |
 | **Playback** | Synced playback of every camera on a zoomable timeline, at 1–16× speed, in reverse and frame by frame. It includes thumbnail previews, bookmarks and clip export. |
 | **Motion** | Motion detection that learns and ignores swaying trees and flags. It has masks, sensitivity control, and **smart search** that finds motion in any area you draw. |
+| **AI detection** | Local AI tells people, vehicles and animals apart. Each camera can record and alert only on **people**, **vehicles**, **people and vehicles**, or **anything**. Parked cars, trees and shadows are ignored. It runs on the server; nothing leaves your network. |
 | **Cameras** | Works with Dahua/Amcrest, Hikvision/Annke, Reolink, OpenIPC, Thingino and any RTSP or ONVIF camera. ONVIF discovery and stream detection, plus PTZ with presets. |
 | **Hardware decoding** | NVIDIA (NVDEC), Intel/AMD (VAAPI) and Apple (VideoToolbox), with automatic fallback to the CPU. |
 | **Time sync** | The server is the cameras' time server (NTP) and corrects any camera clock that drifts, so every camera shows the same time. |
@@ -168,6 +169,17 @@ Open **IPvexa**, sign in with the password the installer printed, and change it 
 </details>
 
 <details>
+<summary><b>AI object detection</b></summary>
+
+- **Choose what counts:** camera settings › **Motion** › **Motion counts for**: *Anything that moves*, *People*, *Vehicles*, or *People and vehicles*.
+- **How it works:** while there is motion, the server looks at a few pictures a second with an object detection model. With a filter set, the event only starts (and is recorded and notified) once a wanted object is seen **moving**. Swaying trees, shadows, rain and animals don't count. Objects that stand in the same place, such as parked cars, are learned and ignored too.
+- **Labels:** every motion event lists what moved, for example *person, car*. The event list shows PERSON, VEHICLE or ANIMAL, and phone alerts say "Person moving at 14:02".
+- **Speed:** the server times the model at start-up. Fast processors use YOLOX-S, the more accurate model. Small mini PCs switch to YOLOX-Tiny (about 80 ms on an Intel N150). Only pictures with motion are analysed.
+- **Setup:** the installer downloads [ONNX Runtime](https://github.com/microsoft/onnxruntime) and the [YOLOX](https://github.com/Megvii-BaseDetection/YOLOX) models from their official releases and checks their checksums. Without an internet connection, motion works as before without the filter; run the installer again later to add it. Set `IPVEXA_NO_AI=1` to turn AI off.
+
+</details>
+
+<details>
 <summary><b>Users and permissions</b></summary>
 
 - **Managing users:** user menu › **User management**.
@@ -242,10 +254,11 @@ The server also checks every camera's clock every 30 minutes over ONVIF. It corr
 | Data and recordings | `/var/lib/ipvexa` | `/Library/Application Support/IPvexa` |
 | Service | `systemctl status ipvexa-server` | `sudo launchctl print system/org.ipvexa.server` |
 | Logs | `journalctl -u ipvexa-server` | `/Library/Application Support/IPvexa/server.log` |
+| AI model and runtime | `/var/lib/ipvexa/ai` | `/Library/Application Support/IPvexa/ai` |
 
 ### Remote access
 
-IPvexa never contacts the internet. To reach it away from home, connect to your network with a VPN such as [WireGuard](https://www.wireguard.com) or [Tailscale](https://tailscale.com), then open `http://<server-lan-ip>:7480`.
+IPvexa never contacts the internet (only the installer downloads its build tools and AI model). To reach it away from home, connect to your network with a VPN such as [WireGuard](https://www.wireguard.com) or [Tailscale](https://tailscale.com), then open `http://<server-lan-ip>:7480`.
 
 > [!WARNING]
 > Don't forward port 7480 on your router. Exposing a camera system directly to the internet is a serious security risk.
@@ -263,7 +276,7 @@ flowchart TB
 
 | Folder | Contents |
 |---|---|
-| [`server/`](server) | **ipvexa-server** (Go). It records with FFmpeg, detects motion, streams live and recorded video, sends alerts, and serves the API and web view. |
+| [`server/`](server) | **ipvexa-server** (Go). It records with FFmpeg, detects motion and objects (AI), streams live and recorded video, sends alerts, and serves the API and web view. |
 | [`client/`](client) | **IPvexa** desktop app (Qt 6, QML and C++, with FFmpeg and hardware decoding). |
 | [`packaging/`](packaging) | systemd unit, desktop launcher and icon, Arch PKGBUILD and macOS app info. |
 | [`scripts/`](scripts) | Install, packaging and development helpers. |
@@ -302,3 +315,5 @@ cd client && cmake --build build --target layout_tests pacer_tests && ./build/la
 ## License
 
 IPvexa is free software under the [GNU General Public License v3.0](LICENSE).
+
+The AI files the installer downloads keep their own licences: ONNX Runtime is MIT-licensed (Microsoft), and the YOLOX models are under the Apache License 2.0 (Megvii).

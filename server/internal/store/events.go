@@ -17,13 +17,16 @@ type Event struct {
 	Level    float64 `json:"level,omitempty"`
 	Note     string  `json:"note,omitempty"`
 	Author   string  `json:"author,omitempty"`
+	// Objects lists what the object detector saw moving during a motion event,
+	// e.g. "car,person" (empty when it wasn't used).
+	Objects string `json:"objects,omitempty"`
 }
 
-const eventCols = `id, camera_id, kind, start_ms, end_ms, cells, level, note, author`
+const eventCols = `id, camera_id, kind, start_ms, end_ms, cells, level, note, author, objects`
 
 func (s *Store) AddEvent(e *Event) error {
-	res, err := s.db.Exec(`INSERT INTO events (camera_id, kind, start_ms, end_ms, cells, level, note, author) VALUES (?,?,?,?,?,?,?,?)`,
-		e.CameraID, e.Kind, e.Start, e.End, e.Cells, e.Level, e.Note, e.Author)
+	res, err := s.db.Exec(`INSERT INTO events (camera_id, kind, start_ms, end_ms, cells, level, note, author, objects) VALUES (?,?,?,?,?,?,?,?,?)`,
+		e.CameraID, e.Kind, e.Start, e.End, e.Cells, e.Level, e.Note, e.Author, e.Objects)
 	if err != nil {
 		return err
 	}
@@ -31,9 +34,9 @@ func (s *Store) AddEvent(e *Event) error {
 	return err
 }
 
-// FinishEvent sets the end time, cells and peak level of an event.
-func (s *Store) FinishEvent(id, end int64, cells string, level float64) error {
-	_, err := s.db.Exec(`UPDATE events SET end_ms=?, cells=?, level=? WHERE id=?`, end, cells, level, id)
+// FinishEvent sets the end time, cells, peak level and objects of an event.
+func (s *Store) FinishEvent(id, end int64, cells string, level float64, objects string) error {
+	_, err := s.db.Exec(`UPDATE events SET end_ms=?, cells=?, level=?, objects=? WHERE id=?`, end, cells, level, objects, id)
 	return err
 }
 
@@ -62,7 +65,7 @@ func (s *Store) DeleteEvent(id int64) error {
 func (s *Store) EventByID(id int64) (Event, error) {
 	var e Event
 	err := s.db.QueryRow(`SELECT `+eventCols+` FROM events WHERE id=?`, id).
-		Scan(&e.ID, &e.CameraID, &e.Kind, &e.Start, &e.End, &e.Cells, &e.Level, &e.Note, &e.Author)
+		Scan(&e.ID, &e.CameraID, &e.Kind, &e.Start, &e.End, &e.Cells, &e.Level, &e.Note, &e.Author, &e.Objects)
 	if err != nil {
 		return e, ErrNotFound
 	}
@@ -121,7 +124,7 @@ func (s *Store) Events(q EventQuery) ([]Event, error) {
 	out := []Event{}
 	for rows.Next() {
 		var e Event
-		if err := rows.Scan(&e.ID, &e.CameraID, &e.Kind, &e.Start, &e.End, &e.Cells, &e.Level, &e.Note, &e.Author); err != nil {
+		if err := rows.Scan(&e.ID, &e.CameraID, &e.Kind, &e.Start, &e.End, &e.Cells, &e.Level, &e.Note, &e.Author, &e.Objects); err != nil {
 			return nil, err
 		}
 		out = append(out, e)

@@ -64,8 +64,12 @@
 - **Motion:** busy cells (trees, flags, water) are learned and ignored, and an event needs the moving area to travel or grow, so things moving in place don't trigger recordings.
 - **Tests:** 24 Go test functions across 7 packages, 63 layout-engine checks.
 
+### ✅ AI object detection
+- **Local AI** (person/vehicle/animal) with ONNX Runtime (loaded at run time, no cgo) and YOLOX-S/Tiny (Apache-2.0) on the CPU. The model is picked by the processor's speed. It only analyses pictures while there is motion, plus one every 30 s to learn parked objects.
+- Per camera, motion can count for **anything**, **people**, **vehicles** or **people and vehicles**. With a filter set, an event (recording, alert) only starts once a wanted object moves inside the moving area. Events list what moved.
+
 ### Next
-- **AI object detection** (person/vehicle/animal) with ONNX Runtime + YOLO on the NVIDIA GPU (CUDA), with OpenVINO/CPU fallback. Best built and tuned on the production machine with the GTX 1080 Ti.
+- **AI on the GPU:** ONNX Runtime's CUDA build for NVIDIA GPUs (needs cuDNN), for many cameras or larger models.
 - **Camera-side events:** the Dahua event stream and OpenIPC/Thingino motion hooks. These need the cameras' HTTP/ONVIF ports reachable from the server.
 - AppImage of the desktop app; then macOS (.dmg) and Windows (.exe installer).
 - iPhone alerts: iOS only delivers background notifications through Apple's servers. Fully offline iOS alerts need the app open, or a self-hosted relay.

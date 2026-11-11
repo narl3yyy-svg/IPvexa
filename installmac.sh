@@ -180,6 +180,17 @@ EOF
     sudo "$FIREWALL" --unblockapp "$BIN" >/dev/null 2>&1 || true
   fi
 
+  # The object detector lets motion be limited to people and vehicles (it runs on
+  # this Mac only).
+  say "Getting the object detector for AI motion filtering (people, vehicles)"
+  if ai="$("$ROOT/scripts/get-ai.sh")"; then
+    mkdir -p "$DATA/ai"
+    rm -f "$DATA/ai"/libonnxruntime*
+    cp "$ai"/* "$DATA/ai/"
+  else
+    warn "could not download the object detector (no internet?). Motion detection works as before, without the people/vehicle filter; run this script again later to add it."
+  fi
+
   say "Starting the server"
   sudo launchctl enable "system/$LABEL" # in case it was disabled before
   sudo launchctl bootstrap system "$PLIST"

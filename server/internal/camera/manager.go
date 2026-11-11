@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"ipvexa/internal/ai"
 	"ipvexa/internal/store"
 )
 
@@ -27,6 +28,9 @@ type Manager struct {
 	FFprobe    string
 	// GPU: decode with the NVIDIA GPU where the server decodes video (motion detection).
 	GPU bool
+	// AI finds people, vehicles and animals in motion (nil or unavailable: motion
+	// isn't filtered by object).
+	AI *ai.Engine
 	// OnEvent is called when a motion event starts (started=true) and when it ends.
 	OnEvent func(e store.Event, started bool)
 

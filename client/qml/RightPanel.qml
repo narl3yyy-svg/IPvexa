@@ -25,6 +25,14 @@ Rectangle {
     }
     onEventKindChanged: loadEvents()
     Timer { interval: 10000; repeat: true; running: root.visible && root.tab === 1; triggeredOnStart: true; onTriggered: root.loadEvents() }
+    // What a motion event was about, from the objects the server's AI saw.
+    function eventBadge(objects) {
+        var o = (objects || "").split(",")
+        if (o.indexOf("person") >= 0) return "PERSON"
+        var vehicles = ["car", "truck", "bus", "motorcycle", "bicycle", "train", "boat"]
+        for (var i = 0; i < o.length; i++) if (vehicles.indexOf(o[i]) >= 0) return "VEHICLE"
+        return o[0] !== "" ? "ANIMAL" : "MOTION"
+    }
     function fmtLen(ms) {
         if (ms <= 0) return "now"
         var s = Math.round(ms / 1000)
@@ -234,7 +242,7 @@ Rectangle {
                             anchors.left: parent.left; anchors.bottom: parent.bottom; anchors.margins: 3
                             width: kindText.implicitWidth + 8; height: 14; radius: 3
                             color: isBm ? "#c0f5a524" : "#c0e5484d"
-                            Text { id: kindText; anchors.centerIn: parent; text: isBm ? "BOOKMARK" : "MOTION"; color: "white"; font.pixelSize: 8; font.weight: Font.Bold }
+                            Text { id: kindText; anchors.centerIn: parent; text: isBm ? "BOOKMARK" : root.eventBadge(modelData.objects); color: "white"; font.pixelSize: 8; font.weight: Font.Bold }
                         }
                     }
                     Column {
@@ -252,6 +260,7 @@ Rectangle {
                             width: parent.width
                             text: isBm ? (modelData.note || "(no note)") + (modelData.author ? "  ·  " + modelData.author : "")
                                        : root.fmtLen(modelData.end > 0 ? modelData.end - modelData.start : 0)
+                                         + (modelData.objects ? "  ·  " + modelData.objects.split(",").join(", ") : "")
                             color: Theme.textFaint; font.pixelSize: 10
                             elide: Text.ElideRight
                         }

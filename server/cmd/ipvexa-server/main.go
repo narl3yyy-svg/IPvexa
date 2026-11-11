@@ -20,6 +20,7 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
+	"ipvexa/internal/ai"
 	"ipvexa/internal/api"
 	"ipvexa/internal/camera"
 	"ipvexa/internal/notify"
@@ -48,6 +49,7 @@ func main() {
 	minFree := flag.Float64("min-free", 10, "minimum free disk space (percent) before oldest footage is deleted")
 	debug := flag.Bool("debug", false, "verbose logging")
 	ntpListen := flag.String("ntp-listen", ":123", "address for the cameras' time server (NTP); empty to turn it off")
+	aiDir := flag.String("ai-dir", "", "folder with the object detector (ONNX Runtime and model; default: <data>/ai)")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage:\n  ipvexa-server [flags]\n  ipvexa-server [flags] passwd <username>   set a user's password (creates an admin if missing)\n\nFlags:\n")
 		flag.PrintDefaults()
@@ -93,6 +95,12 @@ func main() {
 	if mgr.GPU = camera.DetectGPU(*ffmpeg); mgr.GPU {
 		slog.Info("NVIDIA GPU found: motion detection decodes video on the GPU")
 	}
+	if *aiDir == "" {
+		*aiDir = filepath.Join(*dataDir, "ai")
+	}
+	if os.Getenv("IPVEXA_NO_AI") == "" {
+		mgr.AI = ai.Open(*aiDir)
+	}
 	if p := db.Server(*minFree).RecordPath; p != "" {
 		if err := camera.CheckRoot(p); err != nil {
 			slog.Error("recordings folder from the settings is not usable; recording to the default folder", "dir", p, "err", err)
@@ -103,7 +111,7 @@ func main() {
 	notifier := notify.New(db)
 	thumbDir := filepath.Join(*dataDir, "thumbs")
 	apiServer := &api.Server{Store: db, Cams: mgr, RecRoot: *recDir, DataDir: *dataDir, FFmpeg: *ffmpeg, MinFreePct: *minFree,
-		Notify: notifier, ThumbDir: thumbDir}
+		Notify: notifier, ThumbDir: thumbDir, AI: mgr.AI}
 	timeSyncOn := func() bool { return !db.Server(*minFree).TimeSyncOff }
 	var ntpSrv *timesync.NTPServer
 	if *ntpListen != "" {
@@ -122,7 +130,7 @@ func main() {
 	mgr.OnEvent = func(e store.Event, started bool) {
 		if started && e.Kind == "motion" {
 			go apiServer.SaveThumb(e)
-			notifier.Handle(notify.Event{Trigger: "motion", CameraID: e.CameraID, Camera: camName(e.CameraID), Time: time.UnixMilli(e.Start)})
+			notifier.Handle(notify.Event{Trigger: "motion", CameraID: e.CameraID, Camera: camName(e.CameraID), Time: time.UnixMilli(e.Start), Detail: e.Objects})
 		}
 	}
 	if err := mgr.Start(ctx); err != nil {

@@ -41,6 +41,9 @@ type Camera struct {
 	Motion            bool   `json:"motion"`
 	MotionSensitivity int    `json:"motion_sensitivity"` // 1…100
 	MotionMask        string `json:"motion_mask"`        // hex cell set to ignore (see package motion)
+	// MotionObjects limits motion events to moving objects of these kinds, found by
+	// the object detector: "" (any motion), "people", "vehicles" or "people_vehicles".
+	MotionObjects string `json:"motion_objects"`
 
 	// RecordSchedule overrides RecordMode during weekly time windows.
 	RecordSchedule []ScheduleRule `json:"record_schedule"`
@@ -197,6 +200,8 @@ var migrations = []string{
 	);
 	CREATE INDEX audit_time ON audit(at_ms);`,
 	`ALTER TABLE cameras ADD COLUMN record_schedule TEXT NOT NULL DEFAULT '';`,
+	`ALTER TABLE cameras ADD COLUMN motion_objects TEXT NOT NULL DEFAULT '';
+	ALTER TABLE events ADD COLUMN objects TEXT NOT NULL DEFAULT '';`,
 }
 
 func scheduleJSON(rules []ScheduleRule) string {
@@ -250,12 +255,12 @@ func (s *Store) migrate() error {
 
 // ---- cameras ----
 
-const camCols = `id, name, brand, main_url, sub_url, transport, record_mode, record_sub, retention_days, enabled, created_at, ptz, onvif_port, onvif_user, onvif_pass, ptz_protocol, motion, motion_sensitivity, motion_mask, record_schedule`
+const camCols = `id, name, brand, main_url, sub_url, transport, record_mode, record_sub, retention_days, enabled, created_at, ptz, onvif_port, onvif_user, onvif_pass, ptz_protocol, motion, motion_sensitivity, motion_mask, record_schedule, motion_objects`
 
 func scanCamera(r interface{ Scan(...any) error }) (Camera, error) {
 	var c Camera
 	var sched string
-	err := r.Scan(&c.ID, &c.Name, &c.Brand, &c.MainURL, &c.SubURL, &c.Transport, &c.RecordMode, &c.RecordSub, &c.RetentionDays, &c.Enabled, &c.CreatedAt, &c.PTZ, &c.OnvifPort, &c.OnvifUser, &c.OnvifPass, &c.PTZProtocol, &c.Motion, &c.MotionSensitivity, &c.MotionMask, &sched)
+	err := r.Scan(&c.ID, &c.Name, &c.Brand, &c.MainURL, &c.SubURL, &c.Transport, &c.RecordMode, &c.RecordSub, &c.RetentionDays, &c.Enabled, &c.CreatedAt, &c.PTZ, &c.OnvifPort, &c.OnvifUser, &c.OnvifPass, &c.PTZProtocol, &c.Motion, &c.MotionSensitivity, &c.MotionMask, &sched, &c.MotionObjects)
 	if err == nil {
 		c.RecordSchedule = []ScheduleRule{}
 		if sched != "" {
@@ -298,9 +303,9 @@ func (s *Store) Camera(id int64) (Camera, error) {
 
 func (s *Store) CreateCamera(c *Camera) error {
 	c.CreatedAt = time.Now().UnixMilli()
-	res, err := s.db.Exec(`INSERT INTO cameras (name, brand, main_url, sub_url, transport, record_mode, record_sub, retention_days, enabled, created_at, ptz, onvif_port, onvif_user, onvif_pass, ptz_protocol, motion, motion_sensitivity, motion_mask, record_schedule)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, c.Name, c.Brand, c.MainURL, c.SubURL, c.Transport, c.RecordMode, c.RecordSub, c.RetentionDays, c.Enabled, c.CreatedAt,
-		c.PTZ, c.OnvifPort, c.OnvifUser, c.OnvifPass, c.PTZProtocol, c.Motion, c.MotionSensitivity, c.MotionMask, scheduleJSON(c.RecordSchedule))
+	res, err := s.db.Exec(`INSERT INTO cameras (name, brand, main_url, sub_url, transport, record_mode, record_sub, retention_days, enabled, created_at, ptz, onvif_port, onvif_user, onvif_pass, ptz_protocol, motion, motion_sensitivity, motion_mask, record_schedule, motion_objects)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, c.Name, c.Brand, c.MainURL, c.SubURL, c.Transport, c.RecordMode, c.RecordSub, c.RetentionDays, c.Enabled, c.CreatedAt,
+		c.PTZ, c.OnvifPort, c.OnvifUser, c.OnvifPass, c.PTZProtocol, c.Motion, c.MotionSensitivity, c.MotionMask, scheduleJSON(c.RecordSchedule), c.MotionObjects)
 	if err != nil {
 		return err
 	}
@@ -310,9 +315,9 @@ func (s *Store) CreateCamera(c *Camera) error {
 
 func (s *Store) UpdateCamera(c *Camera) error {
 	res, err := s.db.Exec(`UPDATE cameras SET name=?, brand=?, main_url=?, sub_url=?, transport=?, record_mode=?, record_sub=?, retention_days=?, enabled=?,
-		ptz=?, onvif_port=?, onvif_user=?, onvif_pass=?, ptz_protocol=?, motion=?, motion_sensitivity=?, motion_mask=?, record_schedule=? WHERE id=?`,
+		ptz=?, onvif_port=?, onvif_user=?, onvif_pass=?, ptz_protocol=?, motion=?, motion_sensitivity=?, motion_mask=?, record_schedule=?, motion_objects=? WHERE id=?`,
 		c.Name, c.Brand, c.MainURL, c.SubURL, c.Transport, c.RecordMode, c.RecordSub, c.RetentionDays, c.Enabled,
-		c.PTZ, c.OnvifPort, c.OnvifUser, c.OnvifPass, c.PTZProtocol, c.Motion, c.MotionSensitivity, c.MotionMask, scheduleJSON(c.RecordSchedule), c.ID)
+		c.PTZ, c.OnvifPort, c.OnvifUser, c.OnvifPass, c.PTZProtocol, c.Motion, c.MotionSensitivity, c.MotionMask, scheduleJSON(c.RecordSchedule), c.MotionObjects, c.ID)
 	if err != nil {
 		return err
 	}

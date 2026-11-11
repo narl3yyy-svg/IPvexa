@@ -246,6 +246,9 @@ func describe(e Event) (title, body string, tags []string) {
 	at := e.Time.Format("15:04:05")
 	switch e.Trigger {
 	case "motion":
+		if what := objectsText(e.Detail); what != "" {
+			return what + " · " + e.Camera, what + " moving at " + at, []string{"rotating_light"}
+		}
 		return "Motion · " + e.Camera, "Motion detected at " + at, []string{"rotating_light"}
 	case "offline":
 		body := e.Camera + " stopped sending video at " + at
@@ -357,4 +360,29 @@ func (n *Notifier) History(since string) []Message {
 		}
 	}
 	return slices.Clone(n.history) // unknown id: send everything we have
+}
+
+// objectsText turns the objects of a motion event ("car,person") into words
+// ("Person and car"), people first.
+func objectsText(objects string) string {
+	if objects == "" {
+		return ""
+	}
+	var people, rest []string
+	for _, o := range strings.Split(objects, ",") {
+		if o == "person" {
+			people = append(people, o)
+		} else if o != "" {
+			rest = append(rest, o)
+		}
+	}
+	all := append(people, rest...)
+	if len(all) == 0 {
+		return ""
+	}
+	text := all[0]
+	if len(all) > 1 {
+		text = strings.Join(all[:len(all)-1], ", ") + " and " + all[len(all)-1]
+	}
+	return strings.ToUpper(text[:1]) + text[1:]
 }

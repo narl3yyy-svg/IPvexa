@@ -1,14 +1,17 @@
 package camera
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
+	"ipvexa/internal/ai"
 	"ipvexa/internal/motion"
 	"ipvexa/internal/store"
 )
@@ -26,13 +29,45 @@ func (m *Manager) runMotion(ctx context.Context, r *running) {
 	}
 	det := &motion.Detector{Sensitivity: r.cam.MotionSensitivity, Mask: motion.ParseCells(r.cam.MotionMask)}
 	tr := &motion.Tracker{}
+
+	// With the object detector, motion is checked for people, vehicles and animals:
+	// with a filter set, an event only counts once a wanted object moves.
+	gate := newObjectGate(m.AI, r.cam.MotionObjects)
+	aiSize := 0
+	if gate != nil {
+		aiSize = m.AI.Size()
+		go gate.run(ctx)
+	} else if r.cam.MotionObjects != "" {
+		slog.Warn("motion: object detection isn't available, so all motion counts", "camera", r.cam.ID, "wanted", r.cam.MotionObjects)
+	}
+
 	var openID int64
-	finish := func(e *motion.Event) {
-		if e == nil || openID == 0 {
+	var pending *motion.Event // motion waiting for a wanted object
+	open := func(e motion.Event) {
+		ev := store.Event{CameraID: r.cam.ID, Kind: "motion", Start: e.Start, Cells: e.Cells.String(), Level: e.Peak, Objects: gate.objects()}
+		if err := m.Store.AddEvent(&ev); err != nil {
+			slog.Warn("motion: save event", "camera", r.cam.ID, "err", err)
 			return
 		}
-		m.Store.FinishEvent(openID, e.End, e.Cells.String(), e.Peak)
-		ev := store.Event{ID: openID, CameraID: r.cam.ID, Kind: "motion", Start: e.Start, End: e.End, Cells: e.Cells.String(), Level: e.Peak}
+		openID = ev.ID
+		r.motion.Store(true)
+		m.emit(ev, true)
+	}
+	finish := func(e *motion.Event) {
+		if e == nil {
+			return
+		}
+		objects := gate.end()
+		if pending != nil {
+			slog.Debug("motion ignored: no wanted object moved", "camera", r.cam.ID, "wanted", r.cam.MotionObjects, "seen", objects)
+			pending = nil
+			return
+		}
+		if openID == 0 {
+			return
+		}
+		m.Store.FinishEvent(openID, e.End, e.Cells.String(), e.Peak, objects)
+		ev := store.Event{ID: openID, CameraID: r.cam.ID, Kind: "motion", Start: e.Start, End: e.End, Cells: e.Cells.String(), Level: e.Peak, Objects: objects}
 		openID = 0
 		r.motion.Store(false)
 		m.emit(ev, false)
@@ -44,7 +79,7 @@ func (m *Manager) runMotion(ctx context.Context, r *running) {
 	gpu := m.GPU
 	for ctx.Err() == nil {
 		got := 0
-		err := m.analyse(ctx, hub, gpu, func(frame []byte) {
+		err := m.analyse(ctx, hub, gpu, aiSize, gate.setFrame, func(frame []byte) {
 			got++
 			now := time.Now().UnixMilli()
 			res := det.Feed(frame)
@@ -54,19 +89,23 @@ func (m *Manager) runMotion(ctx context.Context, r *running) {
 				slog.Debug("motion analyser", "camera", r.cam.ID, "frames", frames, "peak_level", peak)
 				frames, peak, statAt = 0, 0, time.Now()
 			}
+			gate.addMotion(now, res.Cells)
 			started, ended := tr.Update(now, res)
 			if ended != nil {
 				finish(ended)
 			}
 			if started != nil {
-				ev := store.Event{CameraID: r.cam.ID, Kind: "motion", Start: started.Start, Cells: started.Cells.String(), Level: started.Peak}
-				if err := m.Store.AddEvent(&ev); err != nil {
-					slog.Warn("motion: save event", "camera", r.cam.ID, "err", err)
-					return
+				gate.begin()
+				if gate.filtering() {
+					pending = started
+				} else {
+					open(*started)
 				}
-				openID = ev.ID
-				r.motion.Store(true)
-				m.emit(ev, true)
+			}
+			if pending != nil && gate.isMatched() {
+				e := *pending
+				pending = nil
+				open(e)
 			}
 		})
 		// The stream stopped or restarted: close any open event, then retry.
@@ -96,26 +135,42 @@ func (m *Manager) runMotion(ctx context.Context, r *running) {
 // drops the frames that aren't analysed; only the analysed ones are copied back for
 // the (tiny) final resize. Decoding is the costly part, especially without a
 // substream, when the full-resolution stream is analysed.
-func motionArgs(gpu bool) []string {
+//
+// With aiSize > 0, the same decoded video also gives a few colour pictures a
+// second, scaled to fit in aiSize×aiSize, for the object detector: PAM pictures
+// on file descriptor 3.
+func motionArgs(gpu bool, aiSize int) []string {
 	a := []string{"-hide_banner", "-loglevel", "error", "-nostdin"}
-	vf := fmt.Sprintf("fps=%d,scale=%d:%d:flags=area,format=gray", motionFPS, motion.W, motion.H)
+	pre := fmt.Sprintf("fps=%d", motionFPS)
 	if gpu {
 		a = append(a, "-hwaccel", "cuda", "-hwaccel_output_format", "cuda")
-		vf = fmt.Sprintf("fps=%d,hwdownload,format=nv12|p010le,scale=%d:%d:flags=area,format=gray", motionFPS, motion.W, motion.H)
+		pre += ",hwdownload,format=nv12|p010le"
 	}
-	return append(a, "-probesize", "1000000", "-analyzeduration", "500000",
-		"-fflags", "+genpts+discardcorrupt", "-f", "mpegts", "-i", "pipe:0",
-		"-an", "-sn", "-threads", "1", "-vf", vf, "-f", "rawvideo", "pipe:1")
+	a = append(a, "-probesize", "1000000", "-analyzeduration", "500000",
+		"-fflags", "+genpts+discardcorrupt", "-f", "mpegts", "-i", "pipe:0")
+	grey := fmt.Sprintf("scale=%d:%d:flags=area,format=gray", motion.W, motion.H)
+	if aiSize <= 0 {
+		return append(a, "-an", "-sn", "-threads", "1", "-vf", pre+","+grey, "-f", "rawvideo", "pipe:1")
+	}
+	graph := strings.Join([]string{
+		"[0:v]" + pre + ",split=2[m][d]",
+		"[m]" + grey + "[mo]",
+		fmt.Sprintf("[d]fps=%d,scale=%d:%d:force_original_aspect_ratio=decrease:flags=bilinear,format=rgb24[do]", aiFPS, aiSize, aiSize),
+	}, ";")
+	return append(a, "-filter_complex_threads", "1", "-filter_complex", graph,
+		"-map", "[mo]", "-an", "-sn", "-threads", "1", "-f", "rawvideo", "pipe:1",
+		"-map", "[do]", "-an", "-sn", "-threads", "1", "-f", "image2pipe", "-c:v", "pam", "pipe:3")
 }
 
-// analyse decodes the hub's stream into small greyscale frames and calls fn for each.
-func (m *Manager) analyse(ctx context.Context, hub *Hub, gpu bool, fn func([]byte)) error {
+// analyse decodes the hub's stream into small greyscale frames and calls fn for
+// each. With aiSize > 0 it also passes colour pictures to pic (see motionArgs).
+func (m *Manager) analyse(ctx context.Context, hub *Hub, gpu bool, aiSize int, pic func(ai.Frame), fn func([]byte)) error {
 	sub := hub.Subscribe()
 	defer sub.Close()
 
 	actx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	cmd := exec.CommandContext(actx, m.FFmpeg, motionArgs(gpu)...)
+	cmd := exec.CommandContext(actx, m.FFmpeg, motionArgs(gpu, aiSize)...)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return err
@@ -124,8 +179,33 @@ func (m *Manager) analyse(ctx context.Context, hub *Hub, gpu bool, fn func([]byt
 	if err != nil {
 		return err
 	}
-	if err := cmd.Start(); err != nil {
+	var picR, picW *os.File
+	if aiSize > 0 {
+		if picR, picW, err = os.Pipe(); err != nil {
+			return err
+		}
+		defer picR.Close()
+		cmd.ExtraFiles = []*os.File{picW} // ffmpeg's pipe:3
+	}
+	err = cmd.Start()
+	if picW != nil {
+		picW.Close() // ffmpeg has its own copy
+	}
+	if err != nil {
 		return err
+	}
+	if picR != nil {
+		go func() {
+			br := bufio.NewReaderSize(picR, 1<<20)
+			for {
+				f, err := readPAM(br)
+				if err != nil {
+					cancel() // the two outputs belong together: restart both
+					return
+				}
+				pic(f)
+			}
+		}()
 	}
 	// Feed the live stream to ffmpeg; stop when the stream ends or we're cancelled.
 	go func() {

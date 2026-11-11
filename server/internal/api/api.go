@@ -11,12 +11,14 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
 
+	"ipvexa/internal/ai"
 	"ipvexa/internal/camera"
 	"ipvexa/internal/discovery"
 	"ipvexa/internal/motion"
@@ -42,6 +44,8 @@ type Server struct {
 	ThumbDir string
 	// Clocks keeps the cameras' clocks on the server's time (optional).
 	Clocks *timesync.Syncer
+	// AI is the object detector (optional).
+	AI *ai.Engine
 
 	ptz ptzHub
 }
@@ -384,6 +388,9 @@ func normalize(c *store.Camera) error {
 		c.MotionSensitivity = 50
 	}
 	c.MotionSensitivity = min(c.MotionSensitivity, 100)
+	if !slices.Contains(camera.ValidMotionObjects, c.MotionObjects) {
+		return errors.New("motion objects must be people, vehicles or people_vehicles (or empty for any motion)")
+	}
 	if strings.TrimSpace(c.MotionMask) != "" {
 		c.MotionMask = motion.ParseCells(c.MotionMask).String()
 	} else {

@@ -60,8 +60,8 @@ func TestRecordingAudio(t *testing.T) {
 }
 
 func TestMotionArgsGPU(t *testing.T) {
-	cpu := strings.Join(motionArgs(false), " ")
-	gpu := strings.Join(motionArgs(true), " ")
+	cpu := strings.Join(motionArgs(false, 0), " ")
+	gpu := strings.Join(motionArgs(true, 0), " ")
 	if strings.Contains(cpu, "cuda") {
 		t.Error("CPU analyser must not ask for the GPU")
 	}
@@ -71,6 +71,19 @@ func TestMotionArgsGPU(t *testing.T) {
 		strings.Index(gpu, "-hwaccel") > strings.Index(gpu, "-i pipe:0") ||
 		strings.Index(gpu, "fps=") > strings.Index(gpu, "hwdownload") {
 		t.Errorf("GPU args: %s", gpu)
+	}
+}
+
+func TestMotionArgsAI(t *testing.T) {
+	for _, gpu := range []bool{false, true} {
+		a := strings.Join(motionArgs(gpu, 640), " ")
+		if !strings.Contains(a, "split=2") || !strings.Contains(a, "scale=640:640:force_original_aspect_ratio=decrease") ||
+			!strings.Contains(a, "-c:v pam pipe:3") || !strings.Contains(a, "-f rawvideo pipe:1") {
+			t.Errorf("AI args (gpu %v): %s", gpu, a)
+		}
+		if gpu && strings.Index(a, "fps=") > strings.Index(a, "hwdownload") {
+			t.Errorf("frames must be dropped on the GPU: %s", a)
+		}
 	}
 }
 

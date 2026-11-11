@@ -20,6 +20,9 @@ AppDialog {
     property bool probing: false
     property var probe: null          // last ONVIF stream detection result
     property int motionPad: 10        // seconds kept around motion (server setting)
+    property bool aiAvailable: false  // the server's object detector works
+    property string aiNote: ""        // why it doesn't, or which model it uses
+    readonly property var objectChoices: ["", "people", "vehicles", "people_vehicles"]
     property var schedule: []         // recording schedule rules (see server store.ScheduleRule)
     function changeRule(i, patch) {
         var l = schedule.slice()
@@ -124,6 +127,7 @@ AppDialog {
         motionOn.checked = cam ? !!cam.motion : false
         sensitivity.value = cam && cam.motion_sensitivity ? cam.motion_sensitivity : 50
         zones.mask = cam && cam.motion_mask ? cam.motion_mask : ""
+        objects.currentIndex = Math.max(0, objectChoices.indexOf(cam && cam.motion_objects ? cam.motion_objects : ""))
         schedule = cam && cam.record_schedule ? cam.record_schedule : []
         ptz.checked = cam ? !!cam.ptz : false
         onvifPort.value = cam && cam.onvif_port ? cam.onvif_port : 80
@@ -137,6 +141,10 @@ AppDialog {
         Api.call("GET", "/api/settings", null, function (err, d) {
             if (err || !d) return
             root.motionPad = d.motion_pad_sec || 10
+            root.aiAvailable = !!(d.ai && d.ai.available)
+            root.aiNote = !d.ai ? "" : d.ai.available
+                ? "Runs on the server (" + d.ai.model + (d.ai.avg_ms ? ", " + Math.round(d.ai.avg_ms) + " ms per picture" : "") + "). Nothing leaves your network."
+                : "Object detection isn't set up on the server: run the installer again with an internet connection. " + (d.ai.error || "")
             if (!cam) retention.value = d.retention_days || 30
         })
         tcp.currentIndex = cam && cam.transport === "udp" ? 1 : 0
@@ -160,6 +168,7 @@ AppDialog {
             motion: motionOn.checked || recMode.currentIndex === 2 || schedule.some(function (r) { return r.mode === "motion" }),
             motion_sensitivity: Math.round(sensitivity.value),
             motion_mask: zones.mask,
+            motion_objects: objectChoices[objects.currentIndex],
             record_schedule: schedule,
             record_sub: recSub.checked && subUrl.text.trim() !== "",
             retention_days: retention.value,
@@ -489,10 +498,31 @@ AppDialog {
                     Slider { id: sensitivity; from: 1; to: 100; stepSize: 1; value: 50; Layout.preferredWidth: 160 }
                     Text { text: Math.round(sensitivity.value); color: Theme.text; font.pixelSize: 12; Layout.preferredWidth: 24 }
                 }
+                RowLayout {
+                    spacing: 12
+                    opacity: motionOn.checked || recMode.currentIndex === 2 ? 1 : 0.5
+                    Text { text: "Motion counts for"; color: Theme.text; font.pixelSize: 12 }
+                    ComboBox {
+                        id: objects
+                        Layout.preferredWidth: 220
+                        enabled: root.aiAvailable || currentIndex > 0
+                        model: ["Anything that moves", "People", "Vehicles", "People and vehicles"]
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        text: root.aiNote
+                        color: root.aiAvailable ? Theme.textFaint : Theme.warn
+                        wrapMode: Text.Wrap
+                        font.pixelSize: 11
+                    }
+                }
                 Text {
                     Layout.fillWidth: true
                     Layout.preferredWidth: 100
-                    text: "Things that keep moving in place, like trees and flags in the wind, are learned and ignored automatically, and motion only counts when something moves across the picture. Paint areas to ignore completely (red), such as a busy road or the camera's clock."
+                    text: (objects.currentIndex > 0
+                           ? "AI checks each motion for " + ["", "a person", "a vehicle", "a person or a vehicle"][objects.currentIndex] + " moving in the picture; other motion (trees, shadows, rain, animals) isn't recorded or notified, and parked cars are ignored. "
+                           : root.aiAvailable ? "AI notes who or what moved (people, vehicles, animals) with each event. " : "")
+                          + "Things that keep moving in place, like trees and flags in the wind, are learned and ignored automatically, and motion only counts when something moves across the picture. Paint areas to ignore completely (red), such as a busy road or the camera's clock."
                     color: Theme.textDim
                     wrapMode: Text.Wrap
                     font.pixelSize: 12

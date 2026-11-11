@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"ipvexa/internal/ai"
 	"ipvexa/internal/camera"
 	"ipvexa/internal/storage"
 	"ipvexa/internal/store"
@@ -23,6 +24,7 @@ type settingsView struct {
 	FootageBytes  int64             `json:"footage_bytes"`
 	Version       string            `json:"version"`
 	TimeServer    *timeServerView   `json:"time_server,omitempty"`
+	AI            ai.Status         `json:"ai"` // the object detector
 }
 
 // timeServerView reports the server's time service for cameras.
@@ -51,7 +53,7 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 	du, _ := storage.Usage(root)
 	total, _ := s.Store.TotalFootageBytes()
 	writeJSON(w, 200, settingsView{ServerSettings: s.Store.Server(s.MinFreePct), RecordingsDir: root, DefaultDir: s.RecRoot,
-		DataDir: s.DataDir, Disk: du, FootageBytes: total, Version: Version, TimeServer: s.timeServer()})
+		DataDir: s.DataDir, Disk: du, FootageBytes: total, Version: Version, TimeServer: s.timeServer(), AI: s.AI.Status()})
 }
 
 func (s *Server) timeServer() *timeServerView {
