@@ -56,8 +56,13 @@ int interruptCb(void *opaque)
     return 0;
 }
 
-// Hardware decoders to try, best first: NVIDIA (CUDA/NVDEC), then Intel/AMD (VAAPI).
+// Hardware decoders to try, best first: NVIDIA (CUDA/NVDEC), then Intel/AMD (VAAPI);
+// on a Mac, Apple's VideoToolbox.
+#ifdef __APPLE__
+const AVHWDeviceType kHwTypes[] = {AV_HWDEVICE_TYPE_VIDEOTOOLBOX};
+#else
 const AVHWDeviceType kHwTypes[] = {AV_HWDEVICE_TYPE_CUDA, AV_HWDEVICE_TYPE_VAAPI};
+#endif
 
 // Only try CUDA when the NVIDIA driver is installed; otherwise FFmpeg prints
 // "Cannot load libcuda.so.1" errors for every stream on Intel/AMD machines.
@@ -324,7 +329,9 @@ SessionResult runSession(VideoPlayer *p, Interrupt *intr, const QString &url, bo
                 if ((cfg->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX) && cfg->device_type == type) {
                     if (av_hwdevice_ctx_create(&hwDev, type, nullptr, nullptr, 0) == 0) {
                         hw.pixFmt = cfg->pix_fmt;
-                        hwName = type == AV_HWDEVICE_TYPE_CUDA ? "NVDEC" : "VAAPI";
+                        hwName = type == AV_HWDEVICE_TYPE_CUDA           ? "NVDEC"
+                                 : type == AV_HWDEVICE_TYPE_VIDEOTOOLBOX ? "VideoToolbox"
+                                                                         : "VAAPI";
                     }
                     break;
                 }

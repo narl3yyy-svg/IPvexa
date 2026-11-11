@@ -37,6 +37,32 @@ At the end it prints the first sign-in password and the address for browsers and
 
 You can also build the packages yourself: `./scripts/build-deb.sh` writes them to `dist/`, and `packaging/arch/PKGBUILD` works with `makepkg -si`.
 
+## Install (Mac, Apple silicon)
+
+On a Mac with an M1 or newer chip, install [Homebrew](https://brew.sh) first. Then, from this folder:
+
+```bash
+./installmac.sh
+```
+
+The installer:
+- installs Apple's command line tools if needed, then the build tools, Qt and FFmpeg with Homebrew
+- builds the server and installs it as a background service that starts with the Mac (launchd), running as your user, with data in `/Library/Application Support/IPvexa`
+- builds **IPvexa.app** and puts it in `/Applications`; video is decoded by the Mac's own hardware (VideoToolbox)
+- allows the server through the macOS firewall if the firewall is on
+
+At the end it prints the first sign-in password and the address for browsers, phones and the cameras' time server. The first time the app opens, macOS asks to allow local network access: choose **Allow**.
+
+| Command | What it does |
+|---|---|
+| `./installmac.sh` | Install or upgrade the server and the desktop app |
+| `./installmac.sh --client` | Desktop app only, to view a server on another machine |
+| `./installmac.sh --server` | Server only |
+| `./installmac.sh --uninstall` | Remove the programs; recordings, cameras and settings are kept |
+| `./installmac.sh --purge` | Remove everything, including all recordings and settings (asks you to type DELETE) |
+
+To update: `git pull && ./installmac.sh`. The app uses Homebrew's Qt and FFmpeg, so after `brew upgrade` run the installer again. Intel Macs are not supported. The Mac installer is new and has not yet been run on a real Mac; please report problems.
+
 ## Run from source (development)
 
 ```bash

@@ -73,7 +73,21 @@ target_link_libraries(ipvexa PRIVATE
     PkgConfig::FFMPEG
 )
 
-install(TARGETS ipvexa RUNTIME DESTINATION bin)
+if(APPLE)
+    # A Mac app bundle, IPvexa.app (installmac.sh copies it to /Applications). The
+    # Info.plist asks for local-network access, which macOS requires to reach a server
+    # on the LAN.
+    set_target_properties(ipvexa PROPERTIES
+        OUTPUT_NAME IPvexa
+        MACOSX_BUNDLE TRUE
+        MACOSX_BUNDLE_INFO_PLIST ${CMAKE_CURRENT_SOURCE_DIR}/../packaging/macos/Info.plist.in
+        MACOSX_BUNDLE_GUI_IDENTIFIER org.ipvexa.app
+        MACOSX_BUNDLE_BUNDLE_NAME IPvexa
+        MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION}
+        MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION})
+endif()
+
+install(TARGETS ipvexa RUNTIME DESTINATION bin BUNDLE DESTINATION .)
 
 # Unit tests for the layout engine: cmake --build build --target layout_tests && build/layout_tests
 find_package(Qt6 REQUIRED COMPONENTS Qml)
