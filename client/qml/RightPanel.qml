@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtCore
 import Ipvexa
 
 // Right panel (Nx-style): Notifications (camera status changes as they happen),
@@ -24,6 +25,39 @@ Rectangle {
         Api.call("GET", q, null, function (err, list) { if (!err) root.serverEvents = list || [] })
     }
     onEventKindChanged: loadEvents()
+
+    // Cleared motion events: hidden from this list on this computer only. The
+    // recordings and the timeline's motion marks stay. Bookmarks are never hidden
+    // (they have "Delete bookmark").
+    Settings {
+        id: cleared
+        category: "events"
+        property real before: 0      // motion events that started before this are cleared
+        property string ids: "[]"    // and these single ones (newer than "before")
+    }
+    property var clearedIds: {
+        try { var a = JSON.parse(cleared.ids); return Array.isArray(a) ? a : [] } catch (e) { return [] }
+    }
+    readonly property var shownEvents: serverEvents.filter(function (e) {
+        return e.kind === "bookmark" || (e.start >= cleared.before && clearedIds.indexOf(e.id) < 0)
+    })
+    readonly property int clearableEvents: shownEvents.filter(function (e) { return e.kind !== "bookmark" }).length
+    function clearEvent(id) {
+        var a = clearedIds.concat([id])
+        if (a.length > 1000) a = a.slice(a.length - 1000)
+        cleared.ids = JSON.stringify(a)
+    }
+    function clearAllEvents() {
+        cleared.before = Date.now()
+        cleared.ids = "[]"
+    }
+    // Alerts live in this app only, so clearing removes them.
+    function clearAlert(i) {
+        var list = events.slice()
+        list.splice(i, 1)
+        events = list
+    }
+    function clearAllAlerts() { events = []; unread = 0 }
     Timer { interval: 10000; repeat: true; running: root.visible && root.tab === 1; triggeredOnStart: true; onTriggered: root.loadEvents() }
     // What a motion event was about, from the objects the server's AI saw.
     function eventBadge(objects) {
@@ -116,6 +150,24 @@ Rectangle {
         Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: Theme.border }
 
         // ---- Notifications ----
+        RowLayout {
+            visible: root.tab === 0 && root.events.length > 0
+            Layout.fillWidth: true
+            Layout.leftMargin: 12
+            Layout.rightMargin: 6
+            Layout.topMargin: 4
+            Layout.bottomMargin: 2
+            Text {
+                Layout.fillWidth: true
+                text: root.events.length + (root.events.length === 1 ? " alert" : " alerts")
+                color: Theme.textFaint; font.pixelSize: 11
+            }
+            IconButton {
+                text: "Clear all"; iconKind: "close"; iconSize: 9; size: 24
+                tip: "Remove every alert from this list (right-click one to remove just that one)"
+                onClicked: root.clearAllAlerts()
+            }
+        }
         ListView {
             visible: root.tab === 0
             Layout.fillWidth: true
@@ -126,6 +178,7 @@ Rectangle {
             ScrollBar.vertical: ScrollBar {}
             delegate: Rectangle {
                 required property var modelData
+                required property int index
                 width: ListView.view.width
                 height: 54
                 color: ema.containsMouse ? Theme.panelAlt : "transparent"
@@ -163,10 +216,21 @@ Rectangle {
                     id: ema
                     anchors.fill: parent
                     hoverEnabled: true
-                    onClicked: root.cameraFocusRequested(modelData.cam, modelData.time)
-                    ToolTip.visible: containsMouse
+                    acceptedButtons: Qt.LeftButton | Qt.RightButton
+                    onClicked: (m) => {
+                        if (m.button === Qt.RightButton) { alertMenu.popup(); return }
+                        root.cameraFocusRequested(modelData.cam, modelData.time)
+                    }
+                    ToolTip.visible: containsMouse && !alertMenu.visible
                     ToolTip.delay: 700
-                    ToolTip.text: "Show this camera at " + new Date(modelData.time).toLocaleTimeString(Qt.locale(), "HH:mm:ss")
+                    ToolTip.text: "Show this camera at " + new Date(modelData.time).toLocaleTimeString(Qt.locale(), "HH:mm:ss") + " (right-click to clear)"
+                }
+                Menu {
+                    id: alertMenu
+                    MenuItem { text: "Show this camera"; onTriggered: root.cameraFocusRequested(modelData.cam, modelData.time) }
+                    MenuSeparator {}
+                    MenuItem { text: "Clear"; onTriggered: root.clearAlert(index) }
+                    MenuItem { text: "Clear all alerts"; onTriggered: root.clearAllAlerts() }
                 }
             }
             Column {
@@ -187,12 +251,23 @@ Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
             spacing: 0
-            Segmented {
+            RowLayout {
+                Layout.fillWidth: true
                 Layout.margins: 8
-                Layout.alignment: Qt.AlignHCenter
-                value: root.eventKind === "" ? "all" : root.eventKind
-                options: [{ value: "all", label: "All" }, { value: "motion", label: "Motion" }, { value: "bookmark", label: "Bookmarks" }]
-                onPicked: (v) => root.eventKind = v === "all" ? "" : v
+                Layout.rightMargin: 6
+                spacing: 4
+                Segmented {
+                    value: root.eventKind === "" ? "all" : root.eventKind
+                    options: [{ value: "all", label: "All" }, { value: "motion", label: "Motion" }, { value: "bookmark", label: "Bookmarks" }]
+                    onPicked: (v) => root.eventKind = v === "all" ? "" : v
+                }
+                Item { Layout.fillWidth: true }
+                IconButton {
+                    text: "Clear all"; iconKind: "close"; iconSize: 9; size: 24
+                    enabled: root.clearableEvents > 0
+                    tip: "Clear every motion event from this list (right-click one to clear just that one). The recordings and the timeline's motion marks stay; bookmarks stay too."
+                    onClicked: root.clearAllEvents()
+                }
             }
             ListView {
                 id: evList
@@ -200,7 +275,7 @@ Rectangle {
                 Layout.fillHeight: true
                 clip: true
                 spacing: 1
-                model: root.serverEvents
+                model: root.shownEvents
                 ScrollBar.vertical: ScrollBar {}
                 delegate: Rectangle {
                     required property var modelData
@@ -278,6 +353,19 @@ Rectangle {
                     Menu {
                         id: evMenu
                         MenuItem { text: "Play from here"; onTriggered: root.cameraFocusRequested(modelData.camera_id, modelData.start + 8000) }
+                        MenuSeparator { visible: !isBm; height: visible ? implicitHeight : 0 }
+                        MenuItem {
+                            text: "Clear"
+                            visible: !isBm
+                            height: visible ? implicitHeight : 0
+                            onTriggered: root.clearEvent(modelData.id)
+                        }
+                        MenuItem {
+                            text: "Clear all motion events"
+                            visible: !isBm
+                            height: visible ? implicitHeight : 0
+                            onTriggered: root.clearAllEvents()
+                        }
                         MenuItem {
                             text: "Delete bookmark"
                             visible: isBm && (Api.isAdmin || modelData.author === Api.username)
@@ -292,10 +380,10 @@ Rectangle {
                     spacing: 8
                     width: root.width - 40
                     TileIcon { anchors.horizontalCenter: parent.horizontalCenter; kind: "motion"; width: 30; height: 30; color: Theme.textFaint }
-                    Text { anchors.horizontalCenter: parent.horizontalCenter; text: Api.canPlayback ? "No events this week" : "Your account can't view recordings"; color: Theme.textDim; font.pixelSize: 13 }
+                    Text { anchors.horizontalCenter: parent.horizontalCenter; text: !Api.canPlayback ? "Your account can't view recordings" : root.serverEvents.length > 0 ? "All events cleared" : "No events this week"; color: Theme.textDim; font.pixelSize: 13 }
                     Text {
                         width: parent.width; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap
-                        visible: Api.canPlayback
+                        visible: Api.canPlayback && root.serverEvents.length === 0
                         text: "Turn on motion detection in a camera's settings (Motion tab), or right-click the timeline to add a bookmark."
                         color: Theme.textFaint; font.pixelSize: 11
                     }

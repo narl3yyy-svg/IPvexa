@@ -301,125 +301,140 @@ Item {
 
         // ---------- Title bar: logo + layout tabs + user ----------
         Rectangle {
+            id: titleBar
             visible: !root.fullscreenMode
             Layout.fillWidth: true
             Layout.preferredHeight: 42
             color: "#12171a"
             Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: Theme.border }
 
-            RowLayout {
-                anchors.fill: parent
-                anchors.leftMargin: 12
-                anchors.rightMargin: 8
-                spacing: 0
-
-                Logo { size: 22; Layout.alignment: Qt.AlignVCenter }
+            // Logo, in the middle of the window.
+            Row {
+                id: brand
+                anchors.centerIn: parent
+                spacing: 9
+                Logo { size: 22; anchors.verticalCenter: parent.verticalCenter }
                 Text {
-                    Layout.alignment: Qt.AlignVCenter
-                    Layout.leftMargin: 9
-                    Layout.rightMargin: 18
+                    anchors.verticalCenter: parent.verticalCenter
                     text: "IPvexa"
                     color: Theme.text
                     font.pixelSize: 15
                     font.weight: Font.Bold
                     font.letterSpacing: 0.3
                 }
+            }
 
-                // Tabs
-                Repeater {
-                    model: root.tabs
-                    Rectangle {
-                        id: tabItem
-                        required property string modelData
-                        readonly property bool isActive: modelData === root.active
-                        readonly property bool showClose: root.tabs.length > 1 && (tabMa.containsMouse || isActive || closeMa.containsMouse)
-                        Layout.fillHeight: true
-                        Layout.preferredWidth: Math.min(220, tabLabel.implicitWidth + 82)
-                        color: isActive ? Theme.scene : tabMa.containsMouse ? "#192024" : "transparent"
-                        Rectangle { visible: tabItem.isActive; anchors.top: parent.top; width: parent.width; height: 2; color: Theme.accent }
-                        Rectangle { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; height: parent.height - 16; width: 1; color: Theme.border; visible: !tabItem.isActive }
-                        MouseArea {
-                            id: tabMa
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
-                            onClicked: (m) => {
-                                if (m.button === Qt.MiddleButton) root.closeTab(tabItem.modelData)
-                                else if (m.button === Qt.RightButton) tabMenu.popup()
-                                else root.openLayout(tabItem.modelData)
-                            }
-                            onDoubleClicked: { renameDialog.target = tabItem.modelData; renameDialog.open() }
-                        }
-                        TileIcon {
-                            id: tabIcon
-                            anchors.left: parent.left
-                            anchors.leftMargin: 14
-                            anchors.verticalCenter: parent.verticalCenter
-                            kind: "layout"; width: 12; height: 12
-                            color: tabItem.isActive ? Theme.accent : Theme.textFaint
-                        }
-                        Text {
-                            id: tabLabel
-                            anchors.left: tabIcon.right
-                            anchors.leftMargin: 8
-                            anchors.right: tabClose.left
-                            anchors.rightMargin: 6
-                            anchors.top: parent.top
-                            anchors.bottom: parent.bottom
-                            verticalAlignment: Text.AlignVCenter
-                            text: tabItem.modelData
-                            color: tabItem.isActive ? Theme.text : Theme.textDim
-                            font.pixelSize: 12
-                            font.weight: tabItem.isActive ? Font.DemiBold : Font.Normal
-                            elide: Text.ElideRight
-                        }
+            RowLayout {
+                anchors.fill: parent
+                anchors.rightMargin: 8
+                spacing: 0
+
+                // Tabs: they share the space left of the logo, getting narrower
+                // as more are opened.
+                RowLayout {
+                    Layout.fillHeight: true
+                    Layout.fillWidth: false
+                    Layout.maximumWidth: Math.max(0, titleBar.width / 2 - brand.width / 2 - 16)
+                    clip: true
+                    spacing: 0
+                    Repeater {
+                        model: root.tabs
                         Rectangle {
-                            id: tabClose
-                            anchors.right: parent.right
-                            anchors.rightMargin: 8
-                            anchors.verticalCenter: parent.verticalCenter
-                            width: 18; height: 18; radius: 4
-                            opacity: tabItem.showClose ? 1 : 0
-                            color: closeMa.containsMouse ? "#33ffffff" : "transparent"
-                            TileIcon { anchors.centerIn: parent; kind: "close"; width: 8; height: 8; color: closeMa.containsMouse ? Theme.text : Theme.textDim; lineWidth: 1.4 }
-                            MouseArea { id: closeMa; anchors.fill: parent; hoverEnabled: true; enabled: tabItem.showClose; onClicked: root.closeTab(tabItem.modelData) }
-                        }
-                        Menu {
-                            id: tabMenu
-                            MenuItem { text: "Rename…"; onTriggered: { renameDialog.target = tabItem.modelData; renameDialog.open() } }
-                            MenuItem { text: "Duplicate"; onTriggered: root.duplicateLayout(tabItem.modelData) }
-                            MenuItem { text: "Close tab"; enabled: root.tabs.length > 1; onTriggered: root.closeTab(tabItem.modelData) }
-                            MenuSeparator {}
+                            id: tabItem
+                            required property string modelData
+                            readonly property bool isActive: modelData === root.active
+                            readonly property bool showClose: root.tabs.length > 1 && (tabMa.containsMouse || isActive || closeMa.containsMouse)
+                            Layout.fillHeight: true
+                            Layout.preferredWidth: Math.min(220, tabLabel.implicitWidth + 82)
+                            Layout.minimumWidth: 64
+                            color: isActive ? Theme.scene : tabMa.containsMouse ? "#192024" : "transparent"
+                            Rectangle { visible: tabItem.isActive; anchors.top: parent.top; width: parent.width; height: 2; color: Theme.accent }
+                            Rectangle { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; height: parent.height - 16; width: 1; color: Theme.border; visible: !tabItem.isActive }
+                            MouseArea {
+                                id: tabMa
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
+                                onClicked: (m) => {
+                                    if (m.button === Qt.MiddleButton) root.closeTab(tabItem.modelData)
+                                    else if (m.button === Qt.RightButton) tabMenu.popup()
+                                    else root.openLayout(tabItem.modelData)
+                                }
+                                onDoubleClicked: { renameDialog.target = tabItem.modelData; renameDialog.open() }
+                            }
+                            TileIcon {
+                                id: tabIcon
+                                anchors.left: parent.left
+                                anchors.leftMargin: 14
+                                anchors.verticalCenter: parent.verticalCenter
+                                kind: "layout"; width: 12; height: 12
+                                color: tabItem.isActive ? Theme.accent : Theme.textFaint
+                            }
+                            Text {
+                                id: tabLabel
+                                anchors.left: tabIcon.right
+                                anchors.leftMargin: 8
+                                anchors.right: tabClose.left
+                                anchors.rightMargin: 6
+                                anchors.top: parent.top
+                                anchors.bottom: parent.bottom
+                                verticalAlignment: Text.AlignVCenter
+                                text: tabItem.modelData
+                                color: tabItem.isActive ? Theme.text : Theme.textDim
+                                font.pixelSize: 12
+                                font.weight: tabItem.isActive ? Font.DemiBold : Font.Normal
+                                elide: Text.ElideRight
+                            }
+                            Rectangle {
+                                id: tabClose
+                                anchors.right: parent.right
+                                anchors.rightMargin: 8
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: 18; height: 18; radius: 4
+                                opacity: tabItem.showClose ? 1 : 0
+                                color: closeMa.containsMouse ? "#33ffffff" : "transparent"
+                                TileIcon { anchors.centerIn: parent; kind: "close"; width: 8; height: 8; color: closeMa.containsMouse ? Theme.text : Theme.textDim; lineWidth: 1.4 }
+                                MouseArea { id: closeMa; anchors.fill: parent; hoverEnabled: true; enabled: tabItem.showClose; onClicked: root.closeTab(tabItem.modelData) }
+                            }
                             Menu {
-                                title: "Show full screen on"
-                                Repeater {
-                                    model: Qt.application.screens
-                                    MenuItem {
-                                        required property var modelData
-                                        required property int index
-                                        text: "Screen " + (index + 1) + "  ·  " + modelData.width + "×" + modelData.height + (modelData.name ? "  (" + modelData.name + ")" : "")
-                                        onTriggered: root.openWall(tabItem.modelData, index)
+                                id: tabMenu
+                                MenuItem { text: "Rename…"; onTriggered: { renameDialog.target = tabItem.modelData; renameDialog.open() } }
+                                MenuItem { text: "Duplicate"; onTriggered: root.duplicateLayout(tabItem.modelData) }
+                                MenuItem { text: "Close tab"; enabled: root.tabs.length > 1; onTriggered: root.closeTab(tabItem.modelData) }
+                                MenuSeparator {}
+                                Menu {
+                                    title: "Show full screen on"
+                                    Repeater {
+                                        model: Qt.application.screens
+                                        MenuItem {
+                                            required property var modelData
+                                            required property int index
+                                            text: "Screen " + (index + 1) + "  ·  " + modelData.width + "×" + modelData.height + (modelData.name ? "  (" + modelData.name + ")" : "")
+                                            onTriggered: root.openWall(tabItem.modelData, index)
+                                        }
                                     }
                                 }
                             }
                         }
                     }
-                }
-                IconButton {
-                    Layout.alignment: Qt.AlignVCenter
-                    Layout.leftMargin: 4
-                    iconKind: "plus"; iconSize: 12; size: 28
-                    tip: "New layout tab (Ctrl+T)"
-                    onClicked: root.newLayout()
+                    IconButton {
+                        Layout.alignment: Qt.AlignVCenter
+                        Layout.leftMargin: 4
+                        Layout.minimumWidth: 28
+                        iconKind: "plus"; iconSize: 12; size: 28
+                        tip: "New layout tab (Ctrl+T)"
+                        onClicked: root.newLayout()
+                    }
                 }
 
                 Item { Layout.fillWidth: true }
 
-                // Storage gauge
+                // Storage gauge (hidden when the window is too narrow for it
+                // beside the logo)
                 Row {
                     property var d: Api.system.disk
                     readonly property real used: d && d.total > 0 ? 1 - d.free / d.total : 0
-                    visible: !!d && d.total > 0
+                    visible: !!d && d.total > 0 && titleBar.width / 2 - brand.width / 2 > implicitWidth + userBtn.width + 40
                     Layout.alignment: Qt.AlignVCenter
                     Layout.rightMargin: 16
                     spacing: 8
@@ -537,52 +552,85 @@ Item {
                             onClicked: { root.treeVisible = !root.treeVisible; store.treeVisible = root.treeVisible }
                         }
                         ToolSep {}
-                        // Grid size
-                        ToolText { text: "Grid"; color: Theme.textFaint; font.pixelSize: 11 }
-                        Stepper {
-                            value: root.cur.cols; suffix: "cols"
-                            onDecrement: root.update(function (l) { return LE.setGrid(l, l.cols - 1, l.rows) })
-                            onIncrement: root.update(function (l) { return LE.setGrid(l, l.cols + 1, l.rows) })
+                        // The middle controls take the space that is left and scroll
+                        // sideways when the window is narrow, so the buttons on the
+                        // right (tour, full screen, notifications panel) always show.
+                        Flickable {
+                            id: toolScroll
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            Layout.minimumWidth: 0
+                            implicitWidth: 0
+                            clip: true
+                            contentWidth: toolMid.implicitWidth
+                            contentHeight: height
+                            flickableDirection: Flickable.HorizontalFlick
+                            boundsBehavior: Flickable.StopAtBounds
+                            interactive: contentWidth > width
+                            ScrollBar.horizontal: ScrollBar { height: 4; policy: toolScroll.interactive ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff }
+                            // Mouse wheel scrolls the controls sideways too.
+                            WheelHandler {
+                                enabled: toolScroll.interactive
+                                orientation: Qt.Vertical
+                                target: null
+                                onWheel: (w) => {
+                                    toolScroll.contentX = Math.max(0, Math.min(toolScroll.contentWidth - toolScroll.width,
+                                                                               toolScroll.contentX - w.angleDelta.y / 2))
+                                    w.accepted = true
+                                }
+                            }
+                            RowLayout {
+                                id: toolMid
+                                height: toolScroll.height
+                                spacing: 4
+                                // Grid size
+                                ToolText { text: "Grid"; color: Theme.textFaint; font.pixelSize: 11 }
+                                Stepper {
+                                    value: root.cur.cols; suffix: "cols"
+                                    onDecrement: root.update(function (l) { return LE.setGrid(l, l.cols - 1, l.rows) })
+                                    onIncrement: root.update(function (l) { return LE.setGrid(l, l.cols + 1, l.rows) })
+                                }
+                                Stepper {
+                                    value: root.cur.rows; suffix: "rows"
+                                    onDecrement: root.update(function (l) { return LE.setGrid(l, l.cols, l.rows - 1) })
+                                    onIncrement: root.update(function (l) { return LE.setGrid(l, l.cols, l.rows + 1) })
+                                }
+                                IconButton {
+                                    text: "Auto-arrange"
+                                    enabled: root.cur.items.length > 0
+                                    tip: "Arrange these cameras to fill the screen with no empty tiles (for example 5 cameras: 2 on top, 3 below). Drag the borders between tiles to resize them."
+                                    onClicked: root.update(function (l) { return LE.fillScreen(l) })
+                                }
+                                ToolSep {}
+                                ToolText { text: "Tiles"; color: Theme.textFaint; font.pixelSize: 11 }
+                                Segmented {
+                                    value: root.cur.aspect
+                                    options: [{ value: "16:9", label: "16:9", tip: "Widescreen tiles" },
+                                              { value: "4:3", label: "4:3", tip: "Classic 4:3 tiles" },
+                                              { value: "Fill", label: "Fill", tip: "Stretch tiles to fill the screen" }]
+                                    onPicked: (v) => root.update(function (l) { var c = LE.clone(l); c.aspect = v; return c })
+                                }
+                                ToolSep {}
+                                ToolText { text: "Quality"; color: Theme.textFaint; font.pixelSize: 11 }
+                                Segmented {
+                                    value: root.quality
+                                    options: [{ value: "auto", label: "Auto", tip: "High quality for large tiles, low quality for small ones" },
+                                              { value: "high", label: "High", tip: "High quality (main stream) for every tile" },
+                                              { value: "low", label: "Low", tip: "Low quality (substream) for every tile: lightest on network and CPU" }]
+                                    onPicked: (v) => { root.quality = v; store.quality = v }
+                                }
+                                ToolSep {}
+                                ToolText { text: "Live"; color: Theme.textFaint; font.pixelSize: 11 }
+                                Segmented {
+                                    value: String(root.liveBufferMs)
+                                    options: [{ value: "150", label: "Fast", tip: "Lowest delay. Wi-Fi cameras may stutter." },
+                                              { value: "600", label: "Smooth", tip: "About half a second of delay to even out uneven delivery (recommended)" },
+                                              { value: "2500", label: "Smoothest", tip: "About 2.5 s of delay: hides the longer pauses of weak Wi-Fi cameras" }]
+                                    onPicked: (v) => { root.liveBufferMs = parseInt(v); store.liveBufferMs = root.liveBufferMs }
+                                }
+                            }
                         }
-                        Stepper {
-                            value: root.cur.rows; suffix: "rows"
-                            onDecrement: root.update(function (l) { return LE.setGrid(l, l.cols, l.rows - 1) })
-                            onIncrement: root.update(function (l) { return LE.setGrid(l, l.cols, l.rows + 1) })
-                        }
-                        IconButton {
-                            text: "Auto-arrange"
-                            enabled: root.cur.items.length > 0
-                            tip: "Arrange these cameras to fill the screen with no empty tiles (for example 5 cameras: 2 on top, 3 below). Drag the borders between tiles to resize them."
-                            onClicked: root.update(function (l) { return LE.fillScreen(l) })
-                        }
-                        ToolSep {}
-                        ToolText { text: "Tiles"; color: Theme.textFaint; font.pixelSize: 11 }
-                        Segmented {
-                            value: root.cur.aspect
-                            options: [{ value: "16:9", label: "16:9", tip: "Widescreen tiles" },
-                                      { value: "4:3", label: "4:3", tip: "Classic 4:3 tiles" },
-                                      { value: "Fill", label: "Fill", tip: "Stretch tiles to fill the screen" }]
-                            onPicked: (v) => root.update(function (l) { var c = LE.clone(l); c.aspect = v; return c })
-                        }
-                        ToolSep {}
-                        ToolText { text: "Quality"; color: Theme.textFaint; font.pixelSize: 11 }
-                        Segmented {
-                            value: root.quality
-                            options: [{ value: "auto", label: "Auto", tip: "High quality for large tiles, low quality for small ones" },
-                                      { value: "high", label: "High", tip: "High quality (main stream) for every tile" },
-                                      { value: "low", label: "Low", tip: "Low quality (substream) for every tile: lightest on network and CPU" }]
-                            onPicked: (v) => { root.quality = v; store.quality = v }
-                        }
-                        ToolSep {}
-                        ToolText { text: "Live"; color: Theme.textFaint; font.pixelSize: 11 }
-                        Segmented {
-                            value: String(root.liveBufferMs)
-                            options: [{ value: "150", label: "Fast", tip: "Lowest delay. Wi-Fi cameras may stutter." },
-                                      { value: "600", label: "Smooth", tip: "About half a second of delay to even out uneven delivery (recommended)" },
-                                      { value: "2500", label: "Smoothest", tip: "About 2.5 s of delay: hides the longer pauses of weak Wi-Fi cameras" }]
-                            onPicked: (v) => { root.liveBufferMs = parseInt(v); store.liveBufferMs = root.liveBufferMs }
-                        }
-                        Item { Layout.fillWidth: true }
+                        ToolSep { visible: toolScroll.interactive }
                         IconButton {
                             text: root.touring ? "Touring · " + root.tourSeconds + " s" : "Tour"
                             active: root.touring
