@@ -27,7 +27,7 @@ Everything runs on your own hardware. IPvexa never contacts the internet: there 
 
 ## Features
 
-| | |
+| Area | Highlights |
 |---|---|
 | **Recording** | Continuous or motion-only recording with no re-encoding, so quality is untouched and CPU use stays low. Weekly schedules, per-camera retention, storage limits, and a second disk if you want one. |
 | **Live view** | Free-form layouts with resizable tiles, auto-arrange, digital zoom, tours and video walls on extra monitors. A distraction-free full-screen mode shows only the cameras. Live video stays in real time. |
@@ -253,17 +253,11 @@ IPvexa never contacts the internet. To reach it away from home, connect to your 
 ## Architecture
 
 ```mermaid
-flowchart LR
-    C[IP cameras<br/>RTSP · ONVIF] -->|video| S
-    subgraph S[ipvexa-server · Go]
-      R[FFmpeg recording<br/>no re-encoding]
-      M[Motion detection]
-      H[Live stream hub]
-      DB[(SQLite)]
-    end
-    S -->|live · playback · API| A[IPvexa desktop app<br/>Qt 6 · C++]
-    S -->|web view| B[Browsers & phones]
-    S -->|alerts| N[ntfy]
+flowchart TB
+    C["IP cameras<br/>RTSP · ONVIF"] -->|video| S["ipvexa-server · Go<br/>recording · motion · live hub · SQLite"]
+    S -->|live · playback · API| A["IPvexa desktop app<br/>Qt 6 · C++"]
+    S -->|web view| B["Browsers & phones"]
+    S -->|alerts| N["ntfy"]
     S -.->|NTP time| C
 ```
 
