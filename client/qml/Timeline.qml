@@ -160,58 +160,6 @@ Rectangle {
         anchors.rightMargin: 8
         spacing: 8
 
-        // ---------- Transport controls ----------
-        ColumnLayout {
-            spacing: 4
-            Layout.alignment: Qt.AlignVCenter
-            RowLayout {
-                spacing: 2
-                Layout.alignment: Qt.AlignHCenter
-                IconButton { iconKind: "prev"; iconSize: 12; size: 26; tip: "Previous motion or bookmark"; enabled: Api.canPlayback; onClicked: root.jumpEvent(-1) }
-                IconButton { iconKind: "back"; iconSize: 13; tip: "Back 10 s (←)"; enabled: Api.canPlayback; onClicked: Clock.step(-10000) }
-                IconButton {
-                    iconKind: Clock.playing ? "pause" : "play"
-                    size: 34
-                    iconSize: 16
-                    tint: Theme.text
-                    tip: "Play / pause (Space)"
-                    enabled: Api.canPlayback
-                    onClicked: Clock.togglePlay()
-                }
-                IconButton { iconKind: "forward"; iconSize: 13; tip: "Forward 10 s (→)"; enabled: !Clock.live && Api.canPlayback; onClicked: Clock.step(10000) }
-                IconButton { iconKind: "next"; iconSize: 12; size: 26; tip: "Next motion or bookmark"; enabled: !Clock.live && Api.canPlayback; onClicked: root.jumpEvent(1) }
-            }
-            RowLayout {
-                spacing: 2
-                IconButton {
-                    text: "◂◂"; size: 20
-                    tip: "Play backwards (rewind scan at the chosen speed)"
-                    enabled: Api.canPlayback
-                    active: Clock.reverse
-                    onClicked: { root.follow = true; Clock.reverse = !Clock.reverse }
-                }
-                IconButton {
-                    text: "Sync"; size: 20
-                    active: root.sync
-                    tip: root.sync ? "Sync is on: every camera on the layout plays the same moment. Click to play back only the selected camera."
-                                   : "Sync is off: only the selected camera plays back, the others stay live. Click to sync all cameras."
-                    onClicked: root.syncToggled()
-                }
-                IconButton { text: "‹|"; size: 20; tip: "Previous frame (,)"; enabled: Api.canPlayback; onClicked: root.stepFrame(-1) }
-                IconButton { text: "|›"; size: 20; tip: "Next frame (.)"; enabled: Api.canPlayback && !Clock.live; onClicked: root.stepFrame(1) }
-                Repeater {
-                    model: [1, 2, 4, 8, 16]
-                    IconButton {
-                        text: modelData + "×"
-                        size: 20
-                        enabled: !Clock.live
-                        active: !Clock.live && Clock.speed === modelData && (Clock.playing || Clock.reverse)
-                        onClicked: Clock.speed = modelData
-                    }
-                }
-            }
-        }
-
         // ---------- Timeline canvas ----------
         Item {
             Layout.fillWidth: true
@@ -579,21 +527,31 @@ Rectangle {
             }
         }
 
-        // ---------- Right: camera, date (opens the calendar), LIVE / PLAYBACK ----------
+        // ---------- Right: time and date, player buttons, speed / sync / zoom / live ----------
         ColumnLayout {
-            spacing: 4
-            Layout.preferredWidth: 252
+            spacing: 3
+            Layout.preferredWidth: 300
             Layout.fillWidth: false // nested layouts with fill-width children are greedy by default
             Layout.alignment: Qt.AlignVCenter
+            // What you are watching, and which camera.
             RowLayout {
                 Layout.fillWidth: true
                 spacing: 6
+                Text {
+                    text: Clock.live ? "Live"
+                        : Clock.reverse ? "Rewind " + Clock.speed + "×"
+                        : !Clock.playing ? "Paused"
+                        : "Playback" + (Clock.speed > 1 ? " " + Clock.speed + "×" : "")
+                    color: Clock.live ? Theme.live : "#9cc8ff"
+                    font.pixelSize: 10
+                    font.weight: Font.DemiBold
+                }
                 Item { Layout.fillWidth: true }
                 Rectangle {
                     visible: root.searchCells !== ""
                     implicitWidth: srch.implicitWidth + 12
-                    implicitHeight: 18
-                    radius: 9
+                    implicitHeight: 16
+                    radius: 8
                     color: "#3aff7a45"
                     border.color: "#ff7a45"
                     Text {
@@ -606,46 +564,64 @@ Rectangle {
                     MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.searchCleared() }
                 }
                 Text {
-                    Layout.maximumWidth: 150
+                    Layout.maximumWidth: 140
                     text: root.cameraName.length > 0 ? root.cameraName : "No camera selected"
                     color: Theme.textDim
-                    font.pixelSize: 11
+                    font.pixelSize: 10
                     elide: Text.ElideRight
-                    horizontalAlignment: Text.AlignRight
                 }
             }
-            // Date and time of the playhead. Click to pick a day.
+            // Time of the playhead, large, and the date. Click either to pick a day.
             AbstractButton {
                 id: dateBtn
-                Layout.fillWidth: true
-                implicitHeight: 24
+                Layout.alignment: Qt.AlignHCenter
+                implicitWidth: dateRow.implicitWidth + 14
+                implicitHeight: 28
                 hoverEnabled: true
                 onClicked: calendar.opened ? calendar.close() : calendar.open()
                 ToolTip.visible: hovered
                 ToolTip.delay: 600
                 ToolTip.text: "Go to a date"
                 background: Rectangle {
-                    radius: 4
+                    radius: 5
                     color: dateBtn.down || calendar.opened ? Theme.raised : dateBtn.hovered ? Theme.panelAlt : "transparent"
                     border.color: dateBtn.hovered || calendar.opened ? Theme.borderStrong : "transparent"
                 }
                 contentItem: Item {
                     Row {
-                        anchors.right: parent.right
-                        anchors.rightMargin: 6
-                        anchors.verticalCenter: parent.verticalCenter
-                        spacing: 7
-                        TileIcon {
-                            anchors.verticalCenter: parent.verticalCenter
-                            kind: "calendar"; width: 12; height: 12
-                            color: dateBtn.hovered || calendar.opened ? Theme.accent : Theme.textDim
-                        }
+                        id: dateRow
+                        anchors.centerIn: parent
+                        spacing: 9
                         Text {
                             anchors.verticalCenter: parent.verticalCenter
-                            text: root.fmtPos(root.pos)
+                            text: new Date(root.pos).toLocaleTimeString(Qt.locale(), "HH:mm:ss")
                             color: Clock.live ? Theme.text : "#9cc8ff"
-                            font.pixelSize: 13
+                            font.pixelSize: 19
                             font.family: Theme.mono
+                        }
+                        Rectangle {
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: dateInner.implicitWidth + 12
+                            height: 20
+                            radius: 4
+                            color: "transparent"
+                            border.color: Theme.borderStrong
+                            Row {
+                                id: dateInner
+                                anchors.centerIn: parent
+                                spacing: 5
+                                TileIcon {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    kind: "calendar"; width: 11; height: 11
+                                    color: dateBtn.hovered || calendar.opened ? Theme.accent : Theme.textDim
+                                }
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: new Date(root.pos).toLocaleDateString(Qt.locale(), "ddd d MMM yyyy")
+                                    color: Theme.text
+                                    font.pixelSize: 11
+                                }
+                            }
                         }
                     }
                 }
@@ -664,18 +640,47 @@ Rectangle {
                     }
                 }
             }
-            // Playback and zoom: −30 s, play / pause, +30 s, speed, zoom out / in.
+            // Player: previous event, −30 s, previous frame, play / pause, next frame, +30 s, next event.
+            RowLayout {
+                Layout.alignment: Qt.AlignHCenter
+                spacing: 2
+                IconButton { iconKind: "prev"; iconSize: 11; size: 26; tip: "Previous motion or bookmark"; enabled: Api.canPlayback; onClicked: root.jumpEvent(-1) }
+                IconButton { text: "−30"; size: 26; tip: "Back 30 seconds (← for 10 s)"; enabled: Api.canPlayback; onClicked: { root.follow = true; Clock.step(-30000) } }
+                IconButton { text: "‹|"; size: 26; tip: "Previous frame (,)"; enabled: Api.canPlayback; onClicked: root.stepFrame(-1) }
+                AbstractButton {
+                    id: playBtn
+                    implicitWidth: 34
+                    implicitHeight: 34
+                    enabled: Api.canPlayback
+                    hoverEnabled: true
+                    focusPolicy: Qt.NoFocus
+                    onClicked: Clock.togglePlay()
+                    ToolTip.visible: hovered
+                    ToolTip.delay: 600
+                    ToolTip.text: Clock.playing ? "Pause (Space)" : "Play (Space)"
+                    background: Rectangle {
+                        radius: width / 2
+                        color: !playBtn.enabled ? Theme.raised : playBtn.down ? Qt.darker(Theme.accent, 1.2)
+                             : playBtn.hovered ? Qt.lighter(Theme.accent, 1.15) : Theme.accent
+                    }
+                    contentItem: Item {
+                        TileIcon {
+                            anchors.centerIn: parent
+                            anchors.horizontalCenterOffset: Clock.playing ? 0 : 1
+                            kind: Clock.playing ? "pause" : "play"
+                            width: 14; height: 14
+                            color: "white"
+                        }
+                    }
+                }
+                IconButton { text: "|›"; size: 26; tip: "Next frame (.)"; enabled: Api.canPlayback && !Clock.live; onClicked: root.stepFrame(1) }
+                IconButton { text: "+30"; size: 26; tip: "Forward 30 seconds (→ for 10 s)"; enabled: Api.canPlayback && !Clock.live; onClicked: { root.follow = true; Clock.step(30000) } }
+                IconButton { iconKind: "next"; iconSize: 11; size: 26; tip: "Next motion or bookmark"; enabled: !Clock.live && Api.canPlayback; onClicked: root.jumpEvent(1) }
+            }
+            // Speed, rewind, sync · zoom out, view length, zoom in · live.
             RowLayout {
                 Layout.fillWidth: true
-                spacing: 3
-                IconButton { text: "−30 s"; size: 22; tip: "Back 30 seconds"; enabled: Api.canPlayback; onClicked: { root.follow = true; Clock.step(-30000) } }
-                IconButton {
-                    iconKind: Clock.playing ? "pause" : "play"; iconSize: 11; size: 22
-                    tip: Clock.playing ? "Pause (Space)" : "Play (Space)"
-                    enabled: Api.canPlayback
-                    onClicked: Clock.togglePlay()
-                }
-                IconButton { text: "+30 s"; size: 22; tip: "Forward 30 seconds"; enabled: Api.canPlayback && !Clock.live; onClicked: { root.follow = true; Clock.step(30000) } }
+                spacing: 2
                 IconButton {
                     text: (Clock.live ? 1 : Clock.speed) + "×"; size: 22
                     tip: "Playback speed: click for faster (1×, 2×, 4×, 8×, 16×)"
@@ -683,71 +688,70 @@ Rectangle {
                     active: !Clock.live && Clock.speed > 1
                     onClicked: { var v = [1, 2, 4, 8, 16]; Clock.speed = v[(v.indexOf(Clock.speed) + 1) % v.length] }
                 }
-                Item { Layout.fillWidth: true }
-                IconButton { text: "−"; size: 22; tip: "Zoom out (or scroll the mouse wheel on the timeline)"; onClicked: root.zoomTo(root.span * 2, root.pos, 0.5) }
-                IconButton { text: "+"; size: 22; tip: "Zoom in on the playhead"; onClicked: root.zoomTo(root.span / 2, root.pos, 0.5) }
-            }
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: 4
-                IconButton { text: "1h"; size: 20; tip: "Zoom to 1 hour"; onClicked: root.zoomTo(3600000, root.pos, 0.75) }
-                IconButton { text: "1d"; size: 20; tip: "Zoom to 1 day"; onClicked: root.zoomTo(86400000, root.pos, 0.75) }
-                IconButton { text: "7d"; size: 20; tip: "Zoom to 1 week"; onClicked: root.zoomTo(7 * 86400000, root.pos, 0.85) }
                 IconButton {
-                    text: "Day"; size: 20; tip: "Show the whole day of the playhead"
-                    onClicked: {
-                        var p = new Date(root.pos), a = new Date(p.getFullYear(), p.getMonth(), p.getDate())
-                        root.zoomTo(new Date(p.getFullYear(), p.getMonth(), p.getDate() + 1).getTime() - a.getTime(), a.getTime(), 0)
-                    }
+                    text: "◂◂"; size: 22
+                    tip: "Play backwards at the chosen speed"
+                    enabled: Api.canPlayback
+                    active: Clock.reverse
+                    onClicked: { root.follow = true; Clock.reverse = !Clock.reverse }
+                }
+                IconButton {
+                    text: "Sync"; size: 22
+                    active: root.sync
+                    tip: root.sync ? "Sync is on: every camera on the layout plays the same moment. Click to play back only the selected camera."
+                                   : "Sync is off: only the selected camera plays back, the others stay live. Click to sync all cameras."
+                    onClicked: root.syncToggled()
                 }
                 Item { Layout.fillWidth: true }
-                // Back to live (only while playing back).
+                IconButton { text: "−"; size: 22; tip: "Zoom out (or scroll the mouse wheel on the timeline)"; onClicked: root.zoomTo(root.span * 2, root.pos, 0.5) }
+                IconButton {
+                    id: spanBtn
+                    size: 22
+                    text: {
+                        var m = root.span / 60000
+                        return (m < 60 ? Math.round(m) + "m" : m < 1440 ? Math.round(m / 60) + "h" : Math.round(m / 1440) + "d") + " ▾"
+                    }
+                    tip: "Show 1 hour, 1 day, 1 week, or the whole day"
+                    onClicked: spanMenu.opened ? spanMenu.close() : spanMenu.popup(spanBtn, 0, -spanMenu.implicitHeight - 4)
+                    Menu {
+                        id: spanMenu
+                        MenuItem { text: "1 hour"; onTriggered: root.zoomTo(3600000, root.pos, 0.75) }
+                        MenuItem { text: "1 day"; onTriggered: root.zoomTo(86400000, root.pos, 0.75) }
+                        MenuItem { text: "1 week"; onTriggered: root.zoomTo(7 * 86400000, root.pos, 0.85) }
+                        MenuItem {
+                            text: "Whole day"
+                            onTriggered: {
+                                var p = new Date(root.pos), a = new Date(p.getFullYear(), p.getMonth(), p.getDate())
+                                root.zoomTo(new Date(p.getFullYear(), p.getMonth(), p.getDate() + 1).getTime() - a.getTime(), a.getTime(), 0)
+                            }
+                        }
+                    }
+                }
+                IconButton { text: "+"; size: 22; tip: "Zoom in on the playhead"; onClicked: root.zoomTo(root.span / 2, root.pos, 0.5) }
+                Item { implicitWidth: 4 }
+                // Live: a red badge while live; a button back to live while playing back.
                 AbstractButton {
                     id: goLive
-                    visible: !Clock.live
-                    implicitWidth: goLiveTxt.implicitWidth + 16
+                    implicitWidth: liveTxt.implicitWidth + 16
                     implicitHeight: 22
                     hoverEnabled: true
                     onClicked: { root.follow = true; Clock.goLive() }
                     ToolTip.visible: hovered
                     ToolTip.delay: 600
-                    ToolTip.text: "Back to live video (L)"
-                    background: Rectangle { radius: 4; color: goLive.hovered ? "#33ff4757" : "transparent"; border.color: Theme.live }
+                    ToolTip.text: Clock.live ? "Showing live video. Click the timeline to play back recordings." : "Back to live video (L)"
+                    background: Rectangle {
+                        radius: 4
+                        color: Clock.live ? Theme.live : goLive.hovered ? "#33ff4757" : "transparent"
+                        border.color: Theme.live
+                    }
                     contentItem: Text {
-                        id: goLiveTxt
-                        text: "Go live"
-                        color: Theme.live
+                        id: liveTxt
+                        text: Clock.live ? "● LIVE" : "Go live"
+                        color: Clock.live ? "white" : Theme.live
                         font.pixelSize: 11
                         font.weight: Font.DemiBold
                         horizontalAlignment: Text.AlignHCenter
                         verticalAlignment: Text.AlignVCenter
-                    }
-                }
-                // What you are watching: LIVE (red) or recorded footage (blue).
-                Rectangle {
-                    readonly property string label: Clock.live ? "● LIVE"
-                        : Clock.reverse ? "◂◂ REWIND " + Clock.speed + "×"
-                        : !Clock.playing ? "❚❚ PAUSED"
-                        : "▶ PLAYBACK" + (Clock.speed > 1 ? " " + Clock.speed + "×" : "")
-                    implicitWidth: Math.max(64, modeTxt.implicitWidth + 16)
-                    implicitHeight: 22
-                    radius: 4
-                    color: Clock.live ? Theme.live : Clock.playing || Clock.reverse ? "#1f6fd1" : "#2a3f5c"
-                    Text {
-                        id: modeTxt
-                        anchors.centerIn: parent
-                        text: parent.label
-                        color: "white"
-                        font.pixelSize: 11
-                        font.weight: Font.Bold
-                    }
-                    MouseArea {
-                        anchors.fill: parent
-                        enabled: Clock.live
-                        hoverEnabled: true
-                        ToolTip.visible: containsMouse
-                        ToolTip.delay: 600
-                        ToolTip.text: "Showing live video. Click the timeline to play back recordings."
                     }
                 }
             }

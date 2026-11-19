@@ -62,16 +62,23 @@
   .player .stamp { position: absolute; left: 10px; bottom: 10px; font: 600 12px ui-monospace, monospace; padding: 3px 8px; border-radius: 4px; background: #000a; }
   .player .stamp.live { color: #ff6b77; }
   .player .stamp.rec { color: #cfe3ff; background: #0f2a4dcc; }
-  .controls { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 10px; align-items: center; border-bottom: 1px solid var(--border); }
-  .controls button { padding: 6px 11px; }
+  .controls { padding: 6px 10px 8px; border-bottom: 1px solid var(--border); }
+  .controls .row { display: flex; align-items: center; gap: 4px; }
+  .controls .transport { justify-content: center; gap: 6px; margin-bottom: 6px; }
+  .controls button { padding: 6px 10px; background: transparent; border-color: transparent; color: var(--dim); font-weight: 600; }
+  .controls .row:last-child > button { border-color: var(--border); padding: 4px 10px; font-size: 13px; }
   .controls button.on { background: #153a4d; color: var(--accent); border-color: #1f5f86; }
+  .controls #playBtn { width: 44px; height: 44px; border-radius: 50%; background: var(--accent); border-color: var(--accent); color: #fff; font-size: 16px; padding: 0; }
   .grow { flex: 1; }
-  .controls .sm { padding: 4px 8px; font-size: 12px; color: var(--dim); background: transparent; }
+  .spansel { background: transparent; color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 4px 6px; font: inherit; font-size: 13px; }
   .tlwrap { position: relative; padding: 0 10px 2px; }
-  .tlhead { display: flex; align-items: center; gap: 8px; padding: 8px 0 6px; }
-  .datebtn { background: transparent; border-color: var(--border); font: 600 14px ui-monospace, monospace; color: var(--text); padding: 5px 10px; white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .tlhead { display: flex; align-items: center; gap: 10px; padding: 8px 0 6px; }
+  .datebtn { display: flex; align-items: center; gap: 10px; background: transparent; border-color: transparent; padding: 3px 8px; white-space: nowrap; min-width: 0; }
+  .datebtn:hover { border-color: var(--border); }
+  .datebtn .clock { font: 600 21px ui-monospace, monospace; color: var(--text); }
+  .datebtn.rec .clock { color: #9cc8ff; }
+  .datebtn .day { font-size: 13px; color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 2px 8px; overflow: hidden; text-overflow: ellipsis; }
   .tlhead .live-btn { white-space: nowrap; flex: none; }
-  .datebtn.rec { color: #9cc8ff; }
   #tl { display: block; width: 100%; height: 66px; border-radius: 6px; touch-action: none; cursor: pointer; }
   #strip { position: relative; height: 8px; margin-top: 5px; border-radius: 4px; background: #151a20; touch-action: none; cursor: pointer; }
   #strip .mid { position: absolute; top: 0; bottom: 0; width: 1px; background: #2b313c; }
@@ -150,7 +157,7 @@
     <div class="player"><img id="stream" alt=""><video id="video" class="hidden" muted playsinline autoplay></video><div class="stamp live" id="stamp">LIVE</div></div>
     <div class="tlwrap" id="tlwrap">
       <div class="tlhead">
-        <button class="datebtn" id="dateBtn" title="Go to a day with recordings">&#128197; <span id="dateTxt"></span></button>
+        <button class="datebtn" id="dateBtn" title="Go to a day with recordings"><span class="clock" id="clockTxt"></span><span class="day">&#128197; <span id="dateTxt"></span></span></button>
         <span class="grow"></span>
         <button class="live-btn on" id="liveBtn" title="Back to live video">● LIVE</button>
       </div>
@@ -159,15 +166,22 @@
       <div class="cal hidden" id="cal"></div>
     </div>
     <div class="controls">
-      <button id="back30" title="Back 30 seconds">−30 s</button>
-      <button id="playBtn" title="Play / pause" aria-label="Play or pause">❚❚</button>
-      <button id="fwd30" title="Forward 30 seconds">+30 s</button>
-      <button id="speedBtn" title="Playback speed: tap for faster">1×</button>
-      <button id="zoomOut" title="Zoom out" aria-label="Zoom out">−</button>
-      <button id="zoomIn" title="Zoom in" aria-label="Zoom in">+</button>
-      <span class="grow"></span>
-      <button class="sm" data-span="3600000">1h</button><button class="sm" data-span="86400000">1d</button><button class="sm" data-span="604800000">7d</button><button class="sm" id="dayBtn">Day</button>
-      <span class="seg" title="Picture quality"><button id="qSD" class="on">SD</button><button id="qHD">HD</button></span>
+      <div class="row transport">
+        <button id="prevEv" title="Previous motion or bookmark" aria-label="Previous motion or bookmark">⏮</button>
+        <button id="back30" title="Back 30 seconds">−30</button>
+        <button id="playBtn" title="Play / pause" aria-label="Play or pause">❚❚</button>
+        <button id="fwd30" title="Forward 30 seconds">+30</button>
+        <button id="nextEv" title="Next motion or bookmark" aria-label="Next motion or bookmark">⏭</button>
+      </div>
+      <div class="row">
+        <button id="speedBtn" title="Playback speed: tap for faster">1×</button>
+        <span class="grow"></span>
+        <button id="zoomOut" title="Zoom out" aria-label="Zoom out">−</button>
+        <select id="spanSel" class="spansel" title="Show 1 hour, 1 day, 1 week, or the whole day" aria-label="Timeline length"><option value="" hidden>2h</option><option value="3600000">1 hour</option><option value="86400000">1 day</option><option value="604800000">1 week</option><option value="day">Whole day</option></select>
+        <button id="zoomIn" title="Zoom in" aria-label="Zoom in">+</button>
+        <span class="grow"></span>
+        <span class="seg" title="Picture quality"><button id="qSD" class="on">SD</button><button id="qHD">HD</button></span>
+      </div>
     </div>
     <h3>Last 24 hours</h3>
     <ul class="events" id="events"></ul>
@@ -304,8 +318,7 @@ function showCamera(id, t) {
   $("title").textContent = c.name;
   const canPlay = S.me.role === "admin" || S.perms.playback;
   $("tl").classList.toggle("hidden", !canPlay); $("strip").classList.toggle("hidden", !canPlay); $("dateBtn").disabled = !canPlay;
-  ["back30", "fwd30", "playBtn", "speedBtn", "zoomOut", "zoomIn", "dayBtn"].forEach((x) => $(x).classList.toggle("hidden", !canPlay));
-  document.querySelectorAll(".controls .sm").forEach((b) => b.classList.toggle("hidden", !canPlay));
+  ["prevEv", "nextEv", "back30", "fwd30", "playBtn", "speedBtn", "zoomOut", "zoomIn", "spanSel"].forEach((x) => $(x).classList.toggle("hidden", !canPlay));
   S.speed = 1; S.paused = false; updateSpeed();
   TL.chunks = []; TL.events = []; TL.follow = true;
   tlShow(t || Date.now());
@@ -495,8 +508,26 @@ $("speedBtn").onclick = () => {
 };
 $("zoomOut").onclick = () => tlZoomTo((TL.end - TL.start) * 2, position(), 0.5);
 $("zoomIn").onclick = () => tlZoomTo((TL.end - TL.start) / 2, position(), 0.5);
-document.querySelectorAll(".controls .sm[data-span]").forEach((b) => (b.onclick = () => tlZoomTo(+b.dataset.span, position(), 0.75)));
-$("dayBtn").onclick = () => { const d = startOfDay(position()); tlZoomTo(addDays(d, 1) - d, d, 0); };
+$("spanSel").onchange = (e) => {
+  const v = e.target.value;
+  e.target.selectedIndex = 0;
+  if (v === "day") { const d = startOfDay(position()); tlZoomTo(addDays(d, 1) - d, d, 0); }
+  else if (v) tlZoomTo(+v, position(), v === "604800000" ? 0.85 : 0.75);
+};
+// Jump to the previous / next motion or bookmark from the playhead.
+function jumpEvent(dir) {
+  const p = position();
+  let best = null;
+  for (const e of TL.events) {
+    if (dir > 0 && e.start > p + 1500 && (best === null || e.start < best)) best = e.start;
+    if (dir < 0 && e.start < p - 1500 && (best === null || e.start > best)) best = e.start;
+  }
+  if (best === null) return;
+  if (best < TL.start || best > TL.end) tlZoomTo(TL.end - TL.start, best, 0.5);
+  playAt(best - 2000);
+}
+$("prevEv").onclick = () => jumpEvent(-1);
+$("nextEv").onclick = () => jumpEvent(1);
 
 // ---------- Timeline (the same as the desktop app) ----------
 // Two-row ruler (day on top, time below), recorded footage in green, motion in
@@ -528,7 +559,12 @@ function tlTick() {
   const p = position(), span = TL.end - TL.start;
   if (TL.follow && !S.paused && (p > TL.start + span * 0.92 || p < TL.start)) { TL.end = p + span * 0.25; TL.start = TL.end - span; tlChanged(); }
   else tlDraw();
-  $("dateTxt").textContent = new Date(p).toLocaleString([], { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  const d = new Date(p);
+  $("clockTxt").textContent = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+  $("dateTxt").textContent = d.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" });
+  const m = span / 60000;
+  $("spanSel").options[0].text = m < 60 ? Math.round(m) + "m" : m < 1440 ? Math.round(m / 60) + "h" : Math.round(m / 1440) + "d";
+  $("liveBtn").textContent = $("liveBtn").classList.contains("on") ? "● LIVE" : "Go live";
   $("dateBtn").classList.toggle("rec", !!S.playFrom || S.paused);
 }
 function startTimeline() {
