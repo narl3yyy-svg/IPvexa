@@ -734,6 +734,12 @@ Item {
                     for (var i = 0; i < root.cur.items.length; i++) if (root.cur.items[i].cam === cam) root.selectedIndex = i
                     Clock.seek(t - 10000)
                 }
+                clipCamera: timeline.visible ? timeline.cameraId : 0
+                clipFrom: timeline.viewStart
+                clipTo: timeline.viewEnd
+                clipSource: timeline.events
+                playhead: Clock.position
+                onClipPicked: (t) => { timeline.follow = true; Clock.seek(t) }
             }
         }
 

@@ -92,6 +92,12 @@
   .events .t { font-weight: 600; font-size: 13px; } .events .d { color: var(--dim); font-size: 12px; }
   .events .k { font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 3px; margin-right: 6px; }
   .k.motion { background: #e5484d; } .k.bookmark { background: var(--warn); color: #000; }
+  .cliphead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 14px 10px 8px; }
+  .cliphead h3 { margin: 0; }
+  .cliphead .n { color: var(--faint); font-size: 12px; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cliphead .seg button { padding: 4px 10px; font-size: 12px; }
+  .events li.cur { border-color: var(--accent); background: #12293a; }
+  .events li.cur .t { color: #9cc8ff; }
   .empty { color: var(--faint); padding: 10px 14px; font-size: 13px; }
 
   /* Calendar: days with recordings are marked (red: motion) and only they can be picked. */
@@ -183,7 +189,8 @@
         <span class="seg" title="Picture quality"><button id="qSD" class="on">SD</button><button id="qHD">HD</button></span>
       </div>
     </div>
-    <h3>Last 24 hours</h3>
+    <div class="cliphead"><h3>Motion</h3><span class="n" id="clipInfo"></span>
+      <span class="seg" id="clipKind"><button data-k="all" class="on">All</button><button data-k="person">People</button><button data-k="vehicle">Vehicles</button></span></div>
     <ul class="events" id="events"></ul>
   </main>
 </section>
@@ -323,7 +330,7 @@ function showCamera(id, t) {
   TL.chunks = []; TL.events = []; TL.follow = true;
   tlShow(t || Date.now());
   play(t || 0);
-  loadEvents();
+  CL.sig = null; renderClips();
 }
 
 // A short fingerprint of what an <img> shows (a 32×18 copy's pixels).
@@ -565,6 +572,7 @@ function tlTick() {
   const m = span / 60000;
   $("spanSel").options[0].text = m < 60 ? Math.round(m) + "m" : m < 1440 ? Math.round(m / 60) + "h" : Math.round(m / 1440) + "d";
   $("liveBtn").textContent = $("liveBtn").classList.contains("on") ? "● LIVE" : "Go live";
+  markClip(p);
   $("dateBtn").classList.toggle("rec", !!S.playFrom || S.paused);
 }
 function startTimeline() {
@@ -586,6 +594,7 @@ async function tlFetch() {
     if (gen !== TL.gen || !S.cam || S.cam.id !== cam) return;
     TL.chunks = tl.chunks || []; TL.events = ev || [];
     tlDraw();
+    renderClips();
   } catch (e) {}
 }
 
@@ -808,20 +817,68 @@ function calRender(err) {
   }));
 }
 
-async function loadEvents() {
+// ---------- Motion clips: every motion clip in the part of the timeline on screen ----------
+const CL = { kind: "all", sig: null, list: [] };
+const VEHICLES = ["car", "truck", "bus", "motorcycle", "bicycle", "train", "boat"];
+function clipBadge(objects) {
+  const o = (objects || "").split(",");
+  if (o.includes("person")) return "PERSON";
+  if (o.some((x) => VEHICLES.includes(x))) return "VEHICLE";
+  return o[0] ? "ANIMAL" : "MOTION";
+}
+function fmtRange(a, b) {
+  const da = new Date(a), db = new Date(b), hm = { hour: "2-digit", minute: "2-digit", hour12: false };
+  if (da.toDateString() === db.toDateString())
+    return da.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" }) + " " + da.toLocaleTimeString([], hm) + " – " + db.toLocaleTimeString([], hm);
+  const dm = { day: "numeric", month: "short" };
+  return da.toLocaleDateString([], dm) + " " + da.toLocaleTimeString([], hm) + " – " + db.toLocaleDateString([], dm) + " " + db.toLocaleTimeString([], hm);
+}
+function renderClips() {
   const ul = $("events");
   const canPlay = S.me.role === "admin" || S.perms.playback;
+  const span = TL.end - TL.start, tooWide = span > 3 * DAY;
+  let list = [];
+  if (canPlay && !tooWide) {
+    list = TL.events.filter((e) => e.kind === "motion" && e.start >= TL.start && e.start < TL.end
+      && (CL.kind === "all" || (CL.kind === "person" ? (e.objects || "").split(",").includes("person") : (e.objects || "").split(",").some((x) => VEHICLES.includes(x)))))
+      .sort((a, b) => a.start - b.start);
+  }
+  $("clipInfo").textContent = canPlay ? (tooWide ? "" : list.length + (list.length === 1 ? " clip · " : " clips · ")) + fmtRange(TL.start, TL.end) : "";
+  // Rebuild only when the clips change, so thumbnails and scrolling stay put.
+  const sig = [canPlay, tooWide, CL.kind, list.map((e) => e.id + ":" + e.end).join(",")].join("|");
+  if (sig === CL.sig) return;
+  CL.sig = sig; CL.list = list;
   if (!canPlay) { ul.innerHTML = '<li class="empty">Your account can\'t view recordings.</li>'; return; }
-  try {
-    const list = await api(`/api/events?camera=${S.cam.id}&from=${Date.now() - 86400000}&newest=1&limit=60`);
-    if (!list.length) { ul.innerHTML = '<div class="empty">No motion or bookmarks in the last 24 hours.</div>'; return; }
-    ul.innerHTML = list.map((e) => `<li data-t="${e.start}">
+  if (tooWide) { ul.innerHTML = '<div class="empty">Zoom the timeline in to 3 days or less to list motion clips.</div>'; return; }
+  if (!list.length) {
+    const what = CL.kind === "person" ? "No people" : CL.kind === "vehicle" ? "No vehicles" : "No motion";
+    ul.innerHTML = `<div class="empty">${what} in this part of the timeline. The list follows the timeline: zoom out or drag it to see more.</div>`;
+    return;
+  }
+  const long = span > DAY;
+  ul.innerHTML = list.map((e) => `<li data-t="${e.start}" data-e="${e.end || 0}">
       <img loading="lazy" alt="" src="${withToken(`/api/events/${e.id}/thumb?w=192`)}">
-      <div><div class="t"><span class="k ${e.kind}">${e.kind === "motion" ? "MOTION" : "BOOKMARK"}</span>${fmt(e.start, true)}</div>
-      <div class="d">${e.kind === "bookmark" ? esc(e.note || "(no note)") : e.end ? Math.max(1, Math.round((e.end - e.start) / 1000)) + " s" : "now"}</div></div></li>`).join("");
-    ul.querySelectorAll("li[data-t]").forEach((li) => (li.onclick = () => { play(+li.dataset.t - 5000); window.scrollTo({ top: 0, behavior: "smooth" }); }));
-  } catch (err) { ul.innerHTML = `<div class="empty">${esc(err.message)}</div>`; }
+      <div><div class="t"><span class="k motion">${clipBadge(e.objects)}</span>${long ? fmt(e.start, true) : new Date(e.start).toLocaleTimeString([], { hour12: false })}</div>
+      <div class="d">${e.end ? Math.max(1, Math.round((e.end - e.start) / 1000)) + " s" : "now"}${e.objects ? " · " + esc(e.objects.split(",").join(", ")) : ""}</div></div></li>`).join("");
+  ul.querySelectorAll("li[data-t]").forEach((li) => (li.onclick = () => {
+    TL.follow = true;
+    playAt(+li.dataset.t - 2000);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }));
+  markClip(position());
 }
+// Outline the clip the playhead is in.
+function markClip(p) {
+  $("events").querySelectorAll("li[data-t]").forEach((li) => {
+    const a = +li.dataset.t, b = +li.dataset.e || Date.now();
+    li.classList.toggle("cur", p >= a - 2000 && p <= b);
+  });
+}
+$("clipKind").querySelectorAll("button").forEach((b) => (b.onclick = () => {
+  CL.kind = b.dataset.k;
+  $("clipKind").querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === b));
+  renderClips();
+}));
 
 // ---------- Routing: #camera=<id>&t=<ms> (used by phone notifications) ----------
 function route() {

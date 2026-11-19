@@ -15,6 +15,55 @@ Rectangle {
     property int unread: 0
 
     signal cameraFocusRequested(int cameraId, real time)
+    signal clipPicked(real time)
+
+    // ---- Motion tab: every motion clip in the part of the timeline on screen ----
+    property int clipCamera: 0           // the timeline's camera
+    property real clipFrom: 0            // the timeline's visible range
+    property real clipTo: 0
+    property var clipSource: []          // the timeline's events (motion + bookmarks around the view)
+    property real playhead: 0
+    property string clipKind: "all"      // all | person | vehicle
+    property var clips: []
+    readonly property bool clipsTooWide: clipTo - clipFrom > 3 * 86400000   // the timeline skips motion then
+    function isVehicle(objects) {
+        var o = (objects || "").split(","), v = ["car", "truck", "bus", "motorcycle", "bicycle", "train", "boat"]
+        for (var i = 0; i < o.length; i++) if (v.indexOf(o[i]) >= 0) return true
+        return false
+    }
+    // Rebuilt only when the set of clips changes, so the list keeps its scroll position.
+    function refreshClips() {
+        var kind = clipKind, from = clipFrom, to = clipTo
+        var list = (clipSource || []).filter(function (e) {
+            if (e.kind !== "motion" || e.start < from || e.start >= to) return false
+            if (kind === "person") return (e.objects || "").split(",").indexOf("person") >= 0
+            if (kind === "vehicle") return root.isVehicle(e.objects)
+            return true
+        }).sort(function (a, b) { return a.start - b.start })
+        var sig = list.map(function (e) { return e.id + ":" + e.end }).join(",")
+        if (sig !== clipSig) { clipSig = sig; clips = list }
+    }
+    property string clipSig: ""
+    Timer { id: clipDebounce; interval: 250; onTriggered: root.refreshClips() }
+    onClipSourceChanged: clipDebounce.restart()
+    onClipFromChanged: clipDebounce.restart()
+    onClipToChanged: clipDebounce.restart()
+    onClipKindChanged: refreshClips()
+    onClipCameraChanged: { clipSig = ""; clips = [] }
+    // The clip the playhead is in (motion events are short; one still open counts until now).
+    readonly property int currentClip: {
+        for (var i = 0; i < clips.length; i++) {
+            var e = clips[i], end = e.end > 0 ? e.end : Date.now()
+            if (playhead >= e.start - 2000 && playhead <= end) return i
+        }
+        return -1
+    }
+    function fmtRange(a, b) {
+        var da = new Date(a), db = new Date(b)
+        if (da.toDateString() === db.toDateString())
+            return da.toLocaleString(Qt.locale(), "ddd d MMM  HH:mm") + " – " + db.toLocaleString(Qt.locale(), "HH:mm")
+        return da.toLocaleString(Qt.locale(), "d MMM HH:mm") + " – " + db.toLocaleString(Qt.locale(), "d MMM HH:mm")
+    }
 
     // ---- Events tab data ----
     property var serverEvents: []
@@ -124,9 +173,9 @@ Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: 38
             Repeater {
-                model: [{ t: "Alerts", i: "bell" }, { t: "Events", i: "motion" }, { t: "Health", i: "pulse" }]
+                model: [{ t: "Alerts", i: "bell" }, { t: "Events", i: "motion" }, { t: "Motion", i: "play" }, { t: "Health", i: "pulse" }]
                 Rectangle {
-                    width: root.width / 3
+                    width: root.width / 4
                     height: 38
                     color: tma.containsMouse && root.tab !== index ? Theme.panelAlt : "transparent"
                     Row {
@@ -391,9 +440,137 @@ Rectangle {
             }
         }
 
+        // ---- Motion clips in the timeline's view ----
+        ColumnLayout {
+            visible: root.tab === 2
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            spacing: 0
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.margins: 8
+                Layout.bottomMargin: 2
+                spacing: 4
+                Segmented {
+                    value: root.clipKind
+                    options: [{ value: "all", label: "All" }, { value: "person", label: "People" }, { value: "vehicle", label: "Vehicles" }]
+                    onPicked: (v) => root.clipKind = v
+                }
+            }
+            Text {
+                Layout.fillWidth: true
+                Layout.leftMargin: 12
+                Layout.rightMargin: 8
+                Layout.bottomMargin: 6
+                visible: root.clipCamera > 0 && Api.canPlayback
+                text: (root.clipsTooWide ? "" : root.clips.length + (root.clips.length === 1 ? " clip" : " clips") + "  ·  ")
+                      + root.fmtRange(root.clipFrom, root.clipTo)
+                color: Theme.textFaint; font.pixelSize: 11
+                elide: Text.ElideRight
+            }
+            ListView {
+                id: clipList
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+                spacing: 1
+                model: root.clipsTooWide ? [] : root.clips
+                ScrollBar.vertical: ScrollBar {}
+                // Keep the clip being played in sight.
+                Connections {
+                    target: root
+                    function onCurrentClipChanged() {
+                        if (root.currentClip >= 0 && !clipHover.hovered) clipList.positionViewAtIndex(root.currentClip, ListView.Contain)
+                    }
+                }
+                HoverHandler { id: clipHover }
+                delegate: Rectangle {
+                    id: clipRow
+                    required property var modelData
+                    required property int index
+                    readonly property bool cur: index === root.currentClip
+                    width: ListView.view.width
+                    height: 60
+                    color: cur ? Theme.accentSoft : rowMa.containsMouse ? Theme.panelAlt : "transparent"
+                    Rectangle { visible: clipRow.cur; width: 3; height: parent.height; color: Theme.accent }
+                    Rectangle {
+                        id: clipThumb
+                        x: 10; anchors.verticalCenter: parent.verticalCenter
+                        width: 80; height: 45; radius: 4
+                        color: "#0b0e10"
+                        clip: true
+                        Image {
+                            id: cimg
+                            anchors.fill: parent
+                            fillMode: Image.PreserveAspectCrop
+                            asynchronous: true
+                            sourceSize.width: 160
+                            source: clipList.visible ? Api.eventThumbUrl(clipRow.modelData.id) + "&w=160" : ""
+                        }
+                        TileIcon { anchors.centerIn: parent; visible: cimg.status !== Image.Ready; kind: "motion"; width: 14; height: 14; color: Theme.textFaint }
+                        Rectangle {
+                            anchors.left: parent.left; anchors.bottom: parent.bottom; anchors.margins: 3
+                            width: badge.implicitWidth + 8; height: 13; radius: 3
+                            color: "#c0e5484d"
+                            Text { id: badge; anchors.centerIn: parent; text: root.eventBadge(clipRow.modelData.objects); color: "white"; font.pixelSize: 8; font.weight: Font.Bold }
+                        }
+                    }
+                    Column {
+                        anchors.left: clipThumb.right; anchors.leftMargin: 10
+                        anchors.right: parent.right; anchors.rightMargin: 10
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: 2
+                        Text {
+                            width: parent.width
+                            text: new Date(clipRow.modelData.start).toLocaleString(Qt.locale(), root.clipTo - root.clipFrom > 86400000 ? "ddd d MMM  HH:mm:ss" : "HH:mm:ss")
+                                  + "   " + root.fmtLen(clipRow.modelData.end > 0 ? clipRow.modelData.end - clipRow.modelData.start : 0)
+                            color: clipRow.cur ? Theme.accent : Theme.text
+                            font.pixelSize: 12; font.weight: Font.DemiBold
+                        }
+                        Text {
+                            width: parent.width
+                            text: (clipRow.modelData.objects ? clipRow.modelData.objects.split(",").join(", ") : "Motion") + (clipRow.cur ? "  ·  playing" : "")
+                            color: Theme.textDim; font.pixelSize: 11
+                            elide: Text.ElideRight
+                        }
+                    }
+                    MouseArea {
+                        id: rowMa
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.clipPicked(clipRow.modelData.start - 2000)
+                    }
+                }
+                Column {
+                    anchors.centerIn: parent
+                    visible: clipList.count === 0
+                    spacing: 8
+                    width: root.width - 40
+                    TileIcon { anchors.horizontalCenter: parent.horizontalCenter; kind: "motion"; width: 30; height: 30; color: Theme.textFaint }
+                    Text {
+                        width: parent.width; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap
+                        text: !Api.canPlayback ? "Your account can't view recordings"
+                            : root.clipCamera <= 0 ? "Select a camera"
+                            : root.clipsTooWide ? "Zoom the timeline in to 3 days or less to list motion clips"
+                            : root.clipKind === "person" ? "No people in this part of the timeline"
+                            : root.clipKind === "vehicle" ? "No vehicles in this part of the timeline"
+                            : "No motion in this part of the timeline"
+                        color: Theme.textDim; font.pixelSize: 13
+                    }
+                    Text {
+                        width: parent.width; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap
+                        visible: Api.canPlayback && root.clipCamera > 0 && !root.clipsTooWide
+                        text: "The list follows the timeline: zoom out or drag it to see more."
+                        color: Theme.textFaint; font.pixelSize: 11
+                    }
+                }
+            }
+        }
+
         // ---- Health ----
         Flickable {
-            visible: root.tab === 2
+            visible: root.tab === 3
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
