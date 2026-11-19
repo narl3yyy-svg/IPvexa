@@ -62,9 +62,21 @@
   .player .stamp { position: absolute; left: 10px; bottom: 10px; font: 600 12px ui-monospace, monospace; padding: 3px 8px; border-radius: 4px; background: #000a; }
   .player .stamp.live { color: #ff6b77; }
   .player .stamp.rec { color: #cfe3ff; background: #0f2a4dcc; }
-  .controls { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px; align-items: center; border-bottom: 1px solid var(--border); }
-  .controls input[type=datetime-local] { width: auto; flex: 1 1 200px; padding: 8px 10px; color-scheme: dark; }
-  .live-btn { color: var(--live); border-color: var(--live); font-weight: 700; }
+  .controls { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 10px; align-items: center; border-bottom: 1px solid var(--border); }
+  .controls button { padding: 6px 11px; }
+  .controls button.on { background: #153a4d; color: var(--accent); border-color: #1f5f86; }
+  .grow { flex: 1; }
+  .controls .sm { padding: 4px 8px; font-size: 12px; color: var(--dim); background: transparent; }
+  .tlwrap { position: relative; padding: 0 10px 2px; }
+  .tlhead { display: flex; align-items: center; gap: 8px; padding: 8px 0 6px; }
+  .datebtn { background: transparent; border-color: var(--border); font: 600 14px ui-monospace, monospace; color: var(--text); padding: 5px 10px; white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .tlhead .live-btn { white-space: nowrap; flex: none; }
+  .datebtn.rec { color: #9cc8ff; }
+  #tl { display: block; width: 100%; height: 66px; border-radius: 6px; touch-action: none; cursor: pointer; }
+  #strip { position: relative; height: 8px; margin-top: 5px; border-radius: 4px; background: #151a20; touch-action: none; cursor: pointer; }
+  #strip .mid { position: absolute; top: 0; bottom: 0; width: 1px; background: #2b313c; }
+  #thumb { position: absolute; top: 0; height: 8px; border-radius: 4px; background: #56607a; min-width: 14px; }
+  .live-btn { color: var(--live); border-color: var(--live); font-weight: 700; padding: 5px 12px; }
   .live-btn.on { background: var(--live); color: #fff; }
   h3 { margin: 14px 12px 8px; font-size: 13px; color: var(--dim); font-weight: 600; text-transform: uppercase; letter-spacing: .8px; }
   .events { list-style: none; margin: 0; padding: 0 10px; display: grid; gap: 6px; }
@@ -75,8 +87,28 @@
   .k.motion { background: #e5484d; } .k.bookmark { background: var(--warn); color: #000; }
   .empty { color: var(--faint); padding: 10px 14px; font-size: 13px; }
 
+  /* Calendar: days with recordings are marked (red: motion) and only they can be picked. */
+  .cal { position: absolute; bottom: calc(100% - 6px); left: 10px; z-index: 10; width: 284px; max-width: calc(100% - 20px); background: var(--panel); border: 1px solid #36434a;
+         border-radius: 10px; padding: 12px; box-shadow: 0 10px 30px #0008; }
+  .cal .hd { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+  .cal .hd b { flex: 1; text-align: center; font-size: 14px; }
+  .cal .hd button { padding: 4px 10px; background: transparent; }
+  .cal .grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; text-align: center; }
+  .cal .dow { font-size: 11px; color: var(--faint); padding-bottom: 2px; }
+  .cal .day { position: relative; height: 32px; border-radius: 6px; font-size: 13px; color: var(--faint); border: 1px solid transparent; padding: 0; background: transparent; }
+  .cal .day:disabled { opacity: 1; cursor: default; }
+  .cal .day.rec { color: var(--text); font-weight: 600; background: var(--panel2); cursor: pointer; }
+  .cal .day.rec:hover { background: var(--raised); }
+  .cal .day.rec::after { content: ""; position: absolute; left: 50%; bottom: 3px; width: 14px; height: 3px; margin-left: -7px; border-radius: 2px; background: var(--accent); }
+  .cal .day.motion::after { background: #e5484d; }
+  .cal .day.today { border-color: var(--accent); }
+  .cal .day.sel { background: var(--accent); color: #fff; }
+  .cal .day.sel::after { background: #fff; }
+  .cal .note { color: var(--faint); font-size: 11px; text-align: center; margin: 8px 0; min-height: 1em; }
+  .cal .today-btn { width: 100%; }
+
   /* Full screen: only the video, nothing else. Names show while the pointer is over a camera. */
-  body.fs header, body.fs .controls, body.fs h3, body.fs .events { display: none !important; }
+  body.fs header, body.fs .controls, body.fs .tlwrap, body.fs h3, body.fs .events { display: none !important; }
   body.fs, body.fs #app { background: #000; }
   body.fs #grid { height: 100vh; height: 100dvh; padding: 0; gap: 2px;
                   grid-template-columns: repeat(var(--cols), 1fr); grid-template-rows: repeat(var(--rows), 1fr); }
@@ -116,12 +148,25 @@
   <main id="grid"></main>
   <main id="view" class="hidden">
     <div class="player"><img id="stream" alt=""><video id="video" class="hidden" muted playsinline autoplay></video><div class="stamp live" id="stamp">LIVE</div></div>
+    <div class="tlwrap" id="tlwrap">
+      <div class="tlhead">
+        <button class="datebtn" id="dateBtn" title="Go to a day with recordings">&#128197; <span id="dateTxt"></span></button>
+        <span class="grow"></span>
+        <button class="live-btn on" id="liveBtn" title="Back to live video">● LIVE</button>
+      </div>
+      <canvas id="tl" aria-label="Timeline: tap to play from a moment, drag to move, pinch or scroll to zoom"></canvas>
+      <div id="strip" title="Drag to move along the timeline"><div id="thumb"></div></div>
+      <div class="cal hidden" id="cal"></div>
+    </div>
     <div class="controls">
-      <button class="live-btn on" id="liveBtn">● LIVE</button>
       <button id="back30" title="Back 30 seconds">−30 s</button>
+      <button id="playBtn" title="Play / pause" aria-label="Play or pause">❚❚</button>
       <button id="fwd30" title="Forward 30 seconds">+30 s</button>
-      <input type="datetime-local" id="when" step="1" aria-label="Play from">
-      <button id="go">Play</button>
+      <button id="speedBtn" title="Playback speed: tap for faster">1×</button>
+      <button id="zoomOut" title="Zoom out" aria-label="Zoom out">−</button>
+      <button id="zoomIn" title="Zoom in" aria-label="Zoom in">+</button>
+      <span class="grow"></span>
+      <button class="sm" data-span="3600000">1h</button><button class="sm" data-span="86400000">1d</button><button class="sm" data-span="604800000">7d</button><button class="sm" id="dayBtn">Day</button>
       <span class="seg" title="Picture quality"><button id="qSD" class="on">SD</button><button id="qHD">HD</button></span>
     </div>
     <h3>Last 24 hours</h3>
@@ -133,6 +178,7 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
 const S = { token: localStorage.getItem("ipvexa_token") || "", me: null, cams: [], cam: null, playFrom: 0, playStartedAt: 0, perms: {},
+            speed: 1, paused: false, pausedAt: 0,
             hd: localStorage.getItem("ipvexa_hd") === "1" };
 
 async function api(path, opts = {}) {
@@ -232,6 +278,7 @@ function stopStreams() {
   clearInterval(gridTimer); gridTimer = 0;
   clearInterval(clockTimer); clockTimer = 0;
   clearInterval(watchTimer); watchTimer = 0;
+  if (!S.cam) { clearInterval(TL.drawTimer); TL.drawTimer = 0; }
   playGen++; // cancels pending retries of the previous stream
   closeMedia($("stream")); closeMedia($("video"));
   document.querySelectorAll(".player .incoming").forEach((el) => { closeMedia(el); el.remove(); });
@@ -256,7 +303,12 @@ function showCamera(id, t) {
   $("grid").classList.add("hidden"); $("view").classList.remove("hidden"); $("back").classList.remove("hidden");
   $("title").textContent = c.name;
   const canPlay = S.me.role === "admin" || S.perms.playback;
-  ["back30", "fwd30", "when", "go"].forEach((x) => ($(x).disabled = !canPlay));
+  $("tl").classList.toggle("hidden", !canPlay); $("strip").classList.toggle("hidden", !canPlay); $("dateBtn").disabled = !canPlay;
+  ["back30", "fwd30", "playBtn", "speedBtn", "zoomOut", "zoomIn", "dayBtn"].forEach((x) => $(x).classList.toggle("hidden", !canPlay));
+  document.querySelectorAll(".controls .sm").forEach((b) => b.classList.toggle("hidden", !canPlay));
+  S.speed = 1; S.paused = false; updateSpeed();
+  TL.chunks = []; TL.events = []; TL.follow = true;
+  tlShow(t || Date.now());
   play(t || 0);
   loadEvents();
 }
@@ -279,6 +331,10 @@ function pictureSig(img) {
 function play(t, forceMjpeg) {
   const stamp = $("stamp");
   stopStreams();
+  unfreeze();
+  S.paused = false;
+  TL.follow = true;
+  $("playBtn").textContent = "❚❚";
   const gen = playGen;
   const recorded = t > 0 && t < Date.now() - 2000;
   // Recordings are of the main stream; live uses the substream unless HD is on.
@@ -286,7 +342,7 @@ function play(t, forceMjpeg) {
   const useVideo = !forceMjpeg && nativeVideo(stream);
   $("stream").classList.toggle("hidden", useVideo); $("video").classList.toggle("hidden", !useVideo);
   const src = (from) => {
-    const q = recorded ? `t=${Math.round(from)}` : `stream=${stream}`;
+    const q = recorded ? `t=${Math.round(from)}&speed=${S.speed}` : `stream=${stream}`;
     return withToken(useVideo ? `/api/cameras/${S.cam.id}/fmp4?${q}`
       : `/api/cameras/${S.cam.id}/mjpeg?${q}&w=${S.hd ? 1280 : 640}&fps=${S.hd ? 10 : 8}`);
   };
@@ -317,6 +373,7 @@ function play(t, forceMjpeg) {
       el.onerror = failed;
       if (useVideo) el.onended = failed;
       everPlayed = true; retries = 0;
+      if (useVideo) el.playbackRate = recorded ? S.speed : 1;
       connectedAt = lastMove = Date.now(); lastT = -1;
       if (recorded) { S.playFrom = from; S.playStartedAt = Date.now(); }
       stamp.textContent = label();
@@ -350,6 +407,7 @@ function play(t, forceMjpeg) {
     stamp.className = "stamp live"; $("liveBtn").classList.add("on");
   }
   stamp.textContent = recorded ? label() : "LIVE";
+  startTimeline();
   connect(t);
 
   watchTimer = setInterval(() => {
@@ -389,11 +447,330 @@ function setHD(on) {
 }
 $("qSD").onclick = () => setHD(false);
 $("qHD").onclick = () => setHD(true);
-const position = () => (S.playFrom ? S.playFrom + (Date.now() - S.playStartedAt) : Date.now());
-$("liveBtn").onclick = () => play(0);
-$("back30").onclick = () => play(position() - 30000);
-$("fwd30").onclick = () => { const p = position() + 30000; play(p >= Date.now() - 2000 ? 0 : p); };
-$("go").onclick = () => { const v = $("when").value; if (v) play(new Date(v).getTime()); };
+const position = () => (S.paused ? S.pausedAt : S.playFrom ? S.playFrom + (Date.now() - S.playStartedAt) * S.speed : Date.now());
+// Play from a moment: a gap without footage skips ahead to the next recording,
+// and anything at (or after) now is live.
+function playAt(t) {
+  TL.follow = true;
+  if (t >= Date.now() - 2000) { goLive(); return; }
+  const c = TL.chunks.find((c) => t < c[1]);
+  if (c && t < c[0]) t = c[0];
+  play(t);
+}
+function goLive() { S.speed = 1; updateSpeed(); TL.follow = true; play(0); }
+$("liveBtn").onclick = goLive;
+$("back30").onclick = () => playAt(position() - 30000);
+$("fwd30").onclick = () => playAt(position() + 30000);
+
+// Pause keeps the last picture on screen; play carries on from there.
+function freeze() {
+  const el = $("video").classList.contains("hidden") ? $("stream") : $("video");
+  const w = el.videoWidth || el.naturalWidth, h = el.videoHeight || el.naturalHeight;
+  if (!w || !h) return;
+  const c = document.createElement("canvas");
+  c.width = w; c.height = h; c.id = "frozen";
+  c.style.cssText = "position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000";
+  try { c.getContext("2d").drawImage(el, 0, 0, w, h); } catch (e) { return; }
+  $("stamp").parentNode.insertBefore(c, $("stamp"));
+}
+function unfreeze() { const f = $("frozen"); if (f) f.remove(); }
+$("playBtn").onclick = () => {
+  if (S.paused) { playAt(S.pausedAt); return; }
+  const at = position();
+  freeze();
+  stopStreams();
+  S.paused = true; S.pausedAt = at;
+  $("playBtn").textContent = "▶";
+  $("liveBtn").classList.remove("on");
+  $("stamp").className = "stamp rec";
+  $("stamp").textContent = "❚❚ " + fmt(at, true);
+  startTimeline();
+};
+function updateSpeed() { $("speedBtn").textContent = S.speed + "×"; $("speedBtn").classList.toggle("on", S.speed > 1); }
+$("speedBtn").onclick = () => {
+  const v = [1, 2, 4, 8, 16];
+  S.speed = v[(v.indexOf(S.speed) + 1) % v.length];
+  updateSpeed();
+  if (S.playFrom && !S.paused) play(position()); // live stays live; the speed applies to recordings
+};
+$("zoomOut").onclick = () => tlZoomTo((TL.end - TL.start) * 2, position(), 0.5);
+$("zoomIn").onclick = () => tlZoomTo((TL.end - TL.start) / 2, position(), 0.5);
+document.querySelectorAll(".controls .sm[data-span]").forEach((b) => (b.onclick = () => tlZoomTo(+b.dataset.span, position(), 0.75)));
+$("dayBtn").onclick = () => { const d = startOfDay(position()); tlZoomTo(addDays(d, 1) - d, d, 0); };
+
+// ---------- Timeline (the same as the desktop app) ----------
+// Two-row ruler (day on top, time below), recorded footage in green, motion in
+// red, bookmarks in amber, the playhead in blue (red when live). Tap: play from
+// there. Drag: move. Pinch, mouse wheel or −/+: zoom. Double-tap: zoom in.
+const TL = { start: 0, end: 1, chunks: [], events: [], follow: true, gen: 0, fetchTimer: 0, drawTimer: 0, rangeStart: 0, rangeEnd: 1, frozen: false };
+const DAY = 86400000, MIN_SPAN = 15000, MAX_SPAN = 90 * DAY;
+const STEPS = [1e3, 2e3, 5e3, 1e4, 15e3, 3e4, 6e4, 12e4, 3e5, 6e5, 9e5, 18e5, 36e5, 72e5, 108e5, 216e5, 432e5, 864e5, 1728e5, 6048e5];
+const startOfDay = (ms) => { const d = new Date(ms); return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime(); };
+const addDays = (ms, n) => { const d = new Date(ms); return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n).getTime(); };
+
+function tlShow(t) { tlZoomTo(2 * 3600000, t, 0.75); }
+function tlZoomTo(span, anchor, frac) {
+  span = Math.max(MIN_SPAN, Math.min(span, MAX_SPAN));
+  TL.start = anchor - span * frac; TL.end = TL.start + span;
+  // Zoomed to somewhere else: stop pulling the view back to the playhead.
+  const p = position();
+  if (p < TL.start || p > TL.end) TL.follow = false;
+  tlChanged();
+}
+function tlChanged() {
+  clearTimeout(TL.fetchTimer);
+  TL.fetchTimer = setTimeout(tlFetch, 150);
+  tlStrip(); tlDraw();
+}
+function tlTick() {
+  if (!S.cam) return;
+  // Keep the playhead in view while playing.
+  const p = position(), span = TL.end - TL.start;
+  if (TL.follow && !S.paused && (p > TL.start + span * 0.92 || p < TL.start)) { TL.end = p + span * 0.25; TL.start = TL.end - span; tlChanged(); }
+  else tlDraw();
+  $("dateTxt").textContent = new Date(p).toLocaleString([], { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  $("dateBtn").classList.toggle("rec", !!S.playFrom || S.paused);
+}
+function startTimeline() {
+  if (!TL.drawTimer) TL.drawTimer = setInterval(tlTick, 250);
+  tlTick();
+}
+setInterval(() => { if (S.cam && !document.hidden) tlFetch(); }, 10000);
+
+async function tlFetch() {
+  TL.fetchTimer = 0;
+  if (!S.cam || !(S.me.role === "admin" || S.perms.playback)) return;
+  const gen = ++TL.gen, cam = S.cam.id, span = TL.end - TL.start;
+  const from = Math.floor(TL.start - span / 2), to = Math.ceil(TL.end + span / 2);
+  try {
+    const [tl, ev] = await Promise.all([
+      api(`/api/cameras/${cam}/timeline?from=${from}&to=${to}`),
+      api(`/api/events?camera=${cam}&from=${from}&to=${to}&limit=3000${span > 3 * DAY ? "&kind=bookmark" : ""}`),
+    ]);
+    if (gen !== TL.gen || !S.cam || S.cam.id !== cam) return;
+    TL.chunks = tl.chunks || []; TL.events = ev || [];
+    tlDraw();
+  } catch (e) {}
+}
+
+function tlDraw() {
+  const cv = $("tl");
+  if (!S.cam || cv.offsetParent === null) return;
+  const dpr = window.devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight;
+  if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+  const g = cv.getContext("2d");
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const span = TL.end - TL.start, xAt = (t) => ((t - TL.start) / span) * w;
+  const rowH = 15, laneTop = 2 * rowH + 4, laneH = h - laneTop - 3;
+  g.fillStyle = "#212a2f"; g.fillRect(0, 0, w, h);
+  const nowX = xAt(Date.now());
+  if (nowX < w) { g.fillStyle = "#101318"; g.fillRect(Math.max(0, nowX), 0, w - Math.max(0, nowX), h); }
+  g.fillStyle = "#151a20"; g.fillRect(0, 0, w, rowH);
+
+  const pxPerMs = w / span;
+  let label = STEPS[STEPS.length - 1], minor = 0;
+  for (const s of STEPS) if (s * pxPerMs >= 80) { label = s; break; }
+  for (let j = STEPS.length - 1; j >= 0; j--) if (STEPS[j] < label && label % STEPS[j] === 0 && STEPS[j] * pxPerMs >= 8) { minor = STEPS[j]; break; }
+  const tz = -new Date().getTimezoneOffset() * 60000;
+  g.lineWidth = 1;
+  if (minor) {
+    g.strokeStyle = "#2b313c"; g.beginPath();
+    for (let t = Math.floor((TL.start + tz) / minor) * minor - tz; t <= TL.end; t += minor) { const x = Math.round(xAt(t)) + 0.5; g.moveTo(x, 2 * rowH); g.lineTo(x, laneTop - 1); }
+    g.stroke();
+  }
+  g.font = "11px system-ui, sans-serif"; g.textBaseline = "top";
+  const daysBelow = label >= DAY;
+  // Top row: days (months when the bottom row shows days); the one at the left edge stays named.
+  const bigs = [], c0 = new Date(TL.start);
+  let b = daysBelow ? new Date(c0.getFullYear(), c0.getMonth(), 1) : new Date(c0.getFullYear(), c0.getMonth(), c0.getDate());
+  while (b.getTime() <= TL.end && bigs.length < 120) {
+    bigs.push(b.getTime());
+    b = daysBelow ? new Date(b.getFullYear(), b.getMonth() + 1, 1) : new Date(b.getFullYear(), b.getMonth(), b.getDate() + 1);
+  }
+  bigs.forEach((t, i) => {
+    const bx = xAt(t), next = i + 1 < bigs.length ? xAt(bigs[i + 1]) : w;
+    if (bx > 0) { g.strokeStyle = "#56607a"; g.beginPath(); g.moveTo(Math.round(bx) + 0.5, 0); g.lineTo(Math.round(bx) + 0.5, h); g.stroke(); }
+    const txt = new Date(t).toLocaleDateString([], daysBelow ? { month: "long", year: "numeric" } : { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+    const tw = g.measureText(txt).width;
+    const tx = Math.min(Math.max(bx, 0) + 6, next - tw - 8);
+    if (tx + tw > 0 && tx < w) { g.fillStyle = "#e3e8eb"; g.fillText(txt, tx, 2); }
+  });
+  // Bottom row: times (or days).
+  for (let t = Math.floor((TL.start + tz) / label) * label - tz; t <= TL.end + label; t += label) {
+    const x = Math.round(xAt(t)) + 0.5, d = new Date(t);
+    g.strokeStyle = "#3a414e"; g.beginPath(); g.moveTo(x, rowH); g.lineTo(x, h); g.stroke();
+    g.fillStyle = "#98a6ae";
+    g.fillText(daysBelow ? d.toLocaleDateString([], { weekday: "short", day: "numeric" })
+      : d.toLocaleTimeString([], label < 6e4 ? { hour: "2-digit", minute: "2-digit", second: "2-digit" } : { hour: "2-digit", minute: "2-digit" }), x + 4, rowH + 2);
+  }
+  // Footage, motion, bookmarks
+  g.fillStyle = "#1b2028"; g.fillRect(0, laneTop, w, laneH);
+  const grad = g.createLinearGradient(0, laneTop, 0, laneTop + laneH);
+  grad.addColorStop(0, "#38c27d"); grad.addColorStop(1, "#2a9d63");
+  g.fillStyle = grad;
+  for (const c of TL.chunks) {
+    const a = xAt(c[0]), e = xAt(c[1]);
+    if (e < 0 || a > w) continue;
+    g.fillRect(Math.max(0, a), laneTop, Math.max(1.5, Math.min(w, e) - Math.max(0, a)), laneH);
+  }
+  const motionTop = laneTop + laneH * 0.45, now = Date.now();
+  g.fillStyle = "#e5484d";
+  for (const ev of TL.events) {
+    if (ev.kind !== "motion") continue;
+    const a = xAt(ev.start), e = xAt(ev.end > 0 ? ev.end : now);
+    if (e < 0 || a > w) continue;
+    g.fillRect(Math.max(0, a), motionTop, Math.max(2, Math.min(w, e) - Math.max(0, a)), laneTop + laneH - motionTop);
+  }
+  g.fillStyle = "#f5a524";
+  for (const ev of TL.events) if (ev.kind === "bookmark") { const a = xAt(ev.start); if (a > -4 && a < w + 4) g.fillRect(Math.round(a), laneTop - 4, 2, laneH + 4); }
+  // Playhead
+  const px = xAt(position());
+  if (px >= -2 && px <= w + 2) {
+    g.fillStyle = S.playFrom || S.paused ? "#2fa8e0" : "#ff4757";
+    g.fillRect(Math.round(px) - 1, rowH, 2, h - rowH);
+    g.beginPath(); g.moveTo(px - 6, rowH); g.lineTo(px + 6, rowH); g.lineTo(px, rowH + 7); g.closePath(); g.fill();
+  }
+}
+
+// Scroll strip: where the visible part sits in the surrounding days.
+function tlStrip() {
+  const span = TL.end - TL.start;
+  if (!TL.frozen) { TL.rangeStart = startOfDay(TL.start - span); TL.rangeEnd = addDays(startOfDay(TL.end + span), 1); }
+  const len = TL.rangeEnd - TL.rangeStart, st = $("strip");
+  $("thumb").style.left = ((TL.start - TL.rangeStart) / len) * 100 + "%";
+  $("thumb").style.width = (span / len) * 100 + "%";
+  st.querySelectorAll(".mid").forEach((m) => m.remove());
+  for (let d = addDays(TL.rangeStart, 1), n = 0; d < TL.rangeEnd && n < 60; d = addDays(d, 1), n++) {
+    const m = document.createElement("div");
+    m.className = "mid"; m.style.left = ((d - TL.rangeStart) / len) * 100 + "%";
+    st.insertBefore(m, $("thumb"));
+  }
+}
+(() => {
+  const st = $("strip");
+  let grab = 0.5;
+  const move = (x) => {
+    const r = st.getBoundingClientRect(), th = $("thumb").getBoundingClientRect(), span = TL.end - TL.start;
+    TL.follow = false;
+    TL.start = TL.rangeStart + ((x - r.left - grab * th.width) / r.width) * (TL.rangeEnd - TL.rangeStart);
+    TL.end = TL.start + span;
+    tlChanged();
+  };
+  st.addEventListener("pointerdown", (e) => {
+    const th = $("thumb").getBoundingClientRect();
+    grab = e.clientX >= th.left && e.clientX <= th.right ? (e.clientX - th.left) / th.width : 0.5;
+    TL.frozen = true; st.setPointerCapture(e.pointerId); move(e.clientX);
+  });
+  st.addEventListener("pointermove", (e) => { if (TL.frozen) move(e.clientX); });
+  const up = () => { TL.frozen = false; tlStrip(); };
+  st.addEventListener("pointerup", up); st.addEventListener("pointercancel", up);
+})();
+
+// Timeline gestures: tap plays, drag moves, two fingers pinch-zoom, wheel zooms, double-tap zooms in.
+(() => {
+  const cv = $("tl"), pts = new Map();
+  let downX = 0, downStart = 0, moved = false, pinch = null, lastTap = 0, tapTimer = 0;
+  const timeAt = (x) => { const r = cv.getBoundingClientRect(); return TL.start + ((x - r.left) / r.width) * (TL.end - TL.start); };
+  cv.addEventListener("pointerdown", (e) => {
+    cv.setPointerCapture(e.pointerId);
+    pts.set(e.pointerId, e.clientX);
+    if (pts.size === 1) { downX = e.clientX; downStart = TL.start; moved = false; }
+    if (pts.size === 2) {
+      const [a, b] = [...pts.values()];
+      pinch = { dist: Math.abs(a - b) || 1, span: TL.end - TL.start, anchor: timeAt((a + b) / 2) };
+      moved = true;
+    }
+  });
+  cv.addEventListener("pointermove", (e) => {
+    if (!pts.has(e.pointerId)) return;
+    pts.set(e.pointerId, e.clientX);
+    const r = cv.getBoundingClientRect();
+    if (pinch && pts.size >= 2) {
+      const [a, b] = [...pts.values()];
+      tlZoomTo(pinch.span * pinch.dist / (Math.abs(a - b) || 1), pinch.anchor, ((a + b) / 2 - r.left) / r.width);
+      return;
+    }
+    if (Math.abs(e.clientX - downX) > 5) moved = true;
+    if (moved && !pinch) {
+      const span = TL.end - TL.start;
+      TL.follow = false;
+      TL.start = downStart - ((e.clientX - downX) / r.width) * span; TL.end = TL.start + span;
+      tlChanged();
+    }
+  });
+  const up = (e) => {
+    if (!pts.has(e.pointerId)) return;
+    pts.delete(e.pointerId);
+    if (pts.size > 0) return;
+    const wasPinch = !!pinch; pinch = null;
+    if (moved || wasPinch || e.type === "pointercancel") return;
+    const r = cv.getBoundingClientRect(), t = Math.round(timeAt(e.clientX));
+    // A second tap soon after zooms in there instead of playing.
+    if (Date.now() - lastTap < 300) { clearTimeout(tapTimer); lastTap = 0; tlZoomTo((TL.end - TL.start) * 0.4, t, (e.clientX - r.left) / r.width); return; }
+    lastTap = Date.now();
+    tapTimer = setTimeout(() => playAt(t), 300);
+  };
+  cv.addEventListener("pointerup", up); cv.addEventListener("pointercancel", up);
+  cv.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const r = cv.getBoundingClientRect();
+    tlZoomTo((TL.end - TL.start) * Math.pow(1.25, e.deltaY / 100), timeAt(e.clientX), (e.clientX - r.left) / r.width);
+  }, { passive: false });
+  window.addEventListener("resize", () => tlDraw());
+})();
+
+// ---------- Calendar: only days with recordings can be picked ----------
+const CAL = { year: 0, month: 0, days: null, gen: 0 };
+function calOpen() {
+  const p = new Date(position());
+  CAL.year = p.getFullYear(); CAL.month = p.getMonth();
+  $("cal").classList.remove("hidden");
+  calLoad();
+}
+function calClose() { $("cal").classList.add("hidden"); }
+$("dateBtn").onclick = () => ($("cal").classList.contains("hidden") ? calOpen() : calClose());
+document.addEventListener("pointerdown", (e) => { if (!$("cal").contains(e.target) && !$("dateBtn").contains(e.target)) calClose(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") calClose(); });
+async function calLoad() {
+  const gen = ++CAL.gen;
+  CAL.days = null; calRender();
+  const n = new Date(CAL.year, CAL.month + 1, 0).getDate(), b = [];
+  for (let d = 1; d <= n + 1; d++) b.push(new Date(CAL.year, CAL.month, d).getTime());
+  try {
+    const r = await api(`/api/cameras/${S.cam.id}/days?bounds=${b.join(",")}`);
+    if (gen === CAL.gen) { CAL.days = r.days || []; calRender(); }
+  } catch (e) { if (gen === CAL.gen) { CAL.days = []; calRender(e.message); } }
+}
+function calRender(err) {
+  const first = new Date(CAL.year, CAL.month, 1), n = new Date(CAL.year, CAL.month + 1, 0).getDate();
+  const sel = startOfDay(position()), today = startOfDay(Date.now());
+  const canNext = new Date(CAL.year, CAL.month + 1, 1) <= new Date();
+  let h = `<div class="hd"><button id="calPrev" aria-label="Previous month">‹</button><b>${first.toLocaleDateString([], { month: "long", year: "numeric" })}</b>`
+        + `<button id="calNext" aria-label="Next month" ${canNext ? "" : "disabled"}>›</button></div><div class="grid">`;
+  for (let i = 0; i < 7; i++) h += `<div class="dow">${new Date(2024, 0, 7 + i).toLocaleDateString([], { weekday: "short" }).slice(0, 2)}</div>`;
+  for (let i = 0; i < first.getDay(); i++) h += "<div></div>";
+  for (let d = 1; d <= n; d++) {
+    const t = new Date(CAL.year, CAL.month, d).getTime(), info = CAL.days && CAL.days[d - 1];
+    const rec = !!(info && info.rec_ms > 0);
+    const cls = ["day", rec ? "rec" : "", rec && info.motion > 0 ? "motion" : "", t === today ? "today" : "", t === sel ? "sel" : ""].join(" ");
+    const tip = rec ? `${Math.round(info.rec_ms / 360000) / 10} h recorded${info.motion ? " · " + info.motion + " motion" : ""}` : "No recordings";
+    h += `<button class="${cls}" data-d="${d}" title="${tip}" ${rec ? "" : "disabled"}>${d}</button>`;
+  }
+  const any = CAL.days && CAL.days.some((x) => x.rec_ms > 0);
+  h += `</div><div class="note">${err ? esc(err) : !CAL.days ? "Loading…" : any ? "Days with recordings are marked. Red: motion." : "No recordings this month."}</div>`
+     + `<button class="today-btn" id="calToday">Today</button>`;
+  $("cal").innerHTML = h;
+  $("calPrev").onclick = () => { CAL.month--; if (CAL.month < 0) { CAL.month = 11; CAL.year--; } calLoad(); };
+  $("calNext").onclick = () => { CAL.month++; if (CAL.month > 11) { CAL.month = 0; CAL.year++; } calLoad(); };
+  $("calToday").onclick = () => { calClose(); const d = startOfDay(Date.now()); tlZoomTo(addDays(d, 1) - d, d, 0); goLive(); };
+  $("cal").querySelectorAll(".day.rec").forEach((el) => (el.onclick = () => {
+    const info = CAL.days[+el.dataset.d - 1], d = new Date(CAL.year, CAL.month, +el.dataset.d).getTime();
+    calClose();
+    tlZoomTo(addDays(d, 1) - d, d, 0);
+    TL.follow = true;
+    play(info.first || d);
+  }));
+}
 
 async function loadEvents() {
   const ul = $("events");

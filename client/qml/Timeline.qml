@@ -137,6 +137,8 @@ Rectangle {
         newSpan = Math.max(15000, Math.min(newSpan, 90 * 86400000))
         viewStart = anchorTime - newSpan * anchorFrac
         viewEnd = viewStart + newSpan
+        // Zoomed to somewhere else: stop pulling the view back to the playhead.
+        if (pos < viewStart || pos > viewEnd) follow = false
     }
 
     function fmtPos(ms) {
@@ -219,7 +221,7 @@ Rectangle {
                 id: canvas
                 anchors.fill: parent
                 anchors.topMargin: 6
-                anchors.bottomMargin: 6
+                anchors.bottomMargin: 14
                 renderStrategy: Canvas.Cooperative
                 property real hoverX: -1
 
@@ -243,13 +245,16 @@ Rectangle {
                     for (var j = steps.length - 1; j >= 0; j--)
                         if (steps[j] < label && label % steps[j] === 0 && steps[j] * pxPerMs >= 9) { minor = steps[j]; break }
 
-                    var laneTop = 26, laneH = h - laneTop - 6
+                    // Two-row ruler: the day (or month) on top, the time (or day) below.
+                    var rowH = 14, laneTop = 2 * rowH + 6, laneH = h - laneTop - 4
                     // Future (after now): darker
                     var nowX = xAt(Date.now())
                     if (nowX < w) {
                         ctx.fillStyle = "#101318"
                         ctx.fillRect(Math.max(0, nowX), 0, w - Math.max(0, nowX), h)
                     }
+                    ctx.fillStyle = "#151a20"
+                    ctx.fillRect(0, 0, w, rowH)
 
                     // Minor ticks
                     if (minor > 0) {
@@ -259,25 +264,55 @@ Rectangle {
                         var t0 = Math.floor((root.viewStart + tz) / minor) * minor - tz
                         for (var t = t0; t <= root.viewEnd; t += minor) {
                             var x = Math.round(xAt(t)) + 0.5
-                            ctx.moveTo(x, 16); ctx.lineTo(x, 21)
+                            ctx.moveTo(x, 2 * rowH + 1); ctx.lineTo(x, laneTop - 1)
                         }
                         ctx.stroke()
                     }
-                    // Major ticks + labels
                     ctx.font = "11px sans-serif"
                     ctx.textBaseline = "top"
+                    var daysBelow = label >= 864e5
+                    // Top row: days (or months when the bottom row shows days), with
+                    // the one at the left edge always named.
+                    var bigs = []
+                    var cur = new Date(root.viewStart)
+                    var big = daysBelow ? new Date(cur.getFullYear(), cur.getMonth(), 1) : new Date(cur.getFullYear(), cur.getMonth(), cur.getDate())
+                    while (big.getTime() <= root.viewEnd) {
+                        bigs.push(big.getTime())
+                        big = daysBelow ? new Date(big.getFullYear(), big.getMonth() + 1, 1) : new Date(big.getFullYear(), big.getMonth(), big.getDate() + 1)
+                    }
+                    var bigText = function (ms) {
+                        return daysBelow ? new Date(ms).toLocaleDateString(Qt.locale(), "MMMM yyyy")
+                                         : new Date(ms).toLocaleDateString(Qt.locale(), "dddd d MMMM yyyy")
+                    }
+                    for (var bi = 0; bi < bigs.length; bi++) {
+                        var bx = xAt(bigs[bi])
+                        var nextX = bi + 1 < bigs.length ? xAt(bigs[bi + 1]) : w
+                        var tx = Math.max(bx, 0) + 6
+                        if (bx > 0) {
+                            ctx.strokeStyle = "#56607a"
+                            ctx.beginPath(); ctx.moveTo(Math.round(bx) + 0.5, 0); ctx.lineTo(Math.round(bx) + 0.5, h); ctx.stroke()
+                        }
+                        var bt = bigText(bigs[bi])
+                        var tw = ctx.measureText(bt).width
+                        // Slide the label left out of the way of the next one.
+                        tx = Math.min(tx, nextX - tw - 8)
+                        if (tx + tw > 0 && tx < w) {
+                            ctx.fillStyle = Theme.text
+                            ctx.fillText(bt, tx, 1)
+                        }
+                    }
+                    // Bottom row: major ticks with times (or days).
                     var t1 = Math.floor((root.viewStart + tz) / label) * label - tz
                     for (var tt = t1; tt <= root.viewEnd + label; tt += label) {
                         var lx = Math.round(xAt(tt)) + 0.5
                         var d = new Date(tt)
-                        var midnight = d.getHours() === 0 && d.getMinutes() === 0 && d.getSeconds() === 0
-                        ctx.strokeStyle = midnight ? "#56607a" : "#3a414e"
-                        ctx.beginPath(); ctx.moveTo(lx, 12); ctx.lineTo(lx, h); ctx.stroke()
-                        var txt = label >= 864e5 || midnight ? d.toLocaleDateString(Qt.locale(), "ddd d MMM")
+                        ctx.strokeStyle = "#3a414e"
+                        ctx.beginPath(); ctx.moveTo(lx, rowH); ctx.lineTo(lx, h); ctx.stroke()
+                        var txt = daysBelow ? d.toLocaleDateString(Qt.locale(), "ddd d")
                                 : label < 6e4 ? d.toLocaleTimeString(Qt.locale(), "HH:mm:ss")
                                 : d.toLocaleTimeString(Qt.locale(), "HH:mm")
-                        ctx.fillStyle = midnight ? Theme.text : Theme.textDim
-                        ctx.fillText(txt, lx + 4, 1)
+                        ctx.fillStyle = Theme.textDim
+                        ctx.fillText(txt, lx + 4, rowH + 1)
                     }
 
                     // Sync: thin strip above the lane = footage on any camera of the layout
@@ -338,9 +373,9 @@ Rectangle {
                     if (px >= -2 && px <= w + 2) {
                         var col = Clock.live ? Theme.live : Theme.accent
                         ctx.fillStyle = col
-                        ctx.fillRect(Math.round(px) - 1, 12, 2, h - 12)
+                        ctx.fillRect(Math.round(px) - 1, rowH, 2, h - rowH)
                         ctx.beginPath()
-                        ctx.moveTo(px - 6, 12); ctx.lineTo(px + 6, 12); ctx.lineTo(px, 19); ctx.closePath()
+                        ctx.moveTo(px - 6, rowH); ctx.lineTo(px + 6, rowH); ctx.lineTo(px, rowH + 7); ctx.closePath()
                         ctx.fill()
                     }
                 }
@@ -384,11 +419,90 @@ Rectangle {
                             Clock.seek(Math.round(canvas.timeAt(m.x)))
                         }
                     }
+                    // Double-click zooms in on that spot.
+                    onDoubleClicked: (m) => {
+                        if (m.button === Qt.LeftButton) root.zoomTo(root.span * 0.4, canvas.timeAt(m.x), m.x / width)
+                    }
                     onWheel: (w) => {
                         var frac = w.x / width
                         var anchor = canvas.timeAt(w.x)
                         var factor = Math.pow(1.25, -w.angleDelta.y / 120)
                         root.zoomTo(root.span * factor, anchor, frac)
+                    }
+                }
+
+                // Scroll strip: where the visible part sits in the surrounding days.
+                // Drag the handle (or click the strip) to move along the timeline.
+                Item {
+                    id: strip
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: parent.bottom
+                    anchors.topMargin: 3
+                    height: 7
+                    // The range covered: whole local days around the view, at least
+                    // three times what is shown (frozen while dragging).
+                    property real rangeStart: 0
+                    property real rangeEnd: 1
+                    property bool frozen: false
+                    function update() {
+                        if (frozen) return
+                        var pad = root.span
+                        var a = new Date(root.viewStart - pad), b = new Date(root.viewEnd + pad)
+                        rangeStart = new Date(a.getFullYear(), a.getMonth(), a.getDate()).getTime()
+                        rangeEnd = new Date(b.getFullYear(), b.getMonth(), b.getDate() + 1).getTime()
+                    }
+                    Connections {
+                        target: root
+                        function onViewStartChanged() { strip.update() }
+                        function onViewEndChanged() { strip.update() }
+                    }
+                    Component.onCompleted: update()
+                    readonly property real len: Math.max(1, rangeEnd - rangeStart)
+                    Rectangle { anchors.fill: parent; radius: 3.5; color: "#151a20" }
+                    // Midnights
+                    Repeater {
+                        model: Math.min(60, Math.round(strip.len / 86400000) - 1)
+                        Rectangle {
+                            required property int index
+                            x: (new Date(new Date(strip.rangeStart).getFullYear(), new Date(strip.rangeStart).getMonth(),
+                                         new Date(strip.rangeStart).getDate() + index + 1).getTime() - strip.rangeStart) / strip.len * strip.width
+                            width: 1; height: strip.height
+                            color: "#2b313c"
+                        }
+                    }
+                    Rectangle {
+                        id: thumb
+                        x: (root.viewStart - strip.rangeStart) / strip.len * strip.width
+                        width: Math.max(14, root.span / strip.len * strip.width)
+                        height: strip.height
+                        radius: 3.5
+                        color: stripMa.pressed || stripMa.containsMouse ? "#7f8b99" : "#56607a"
+                    }
+                    MouseArea {
+                        id: stripMa
+                        anchors.fill: parent
+                        anchors.topMargin: -4
+                        anchors.bottomMargin: -4
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        property real grab: 0.5   // where on the handle it was taken
+                        function moveTo(x) {
+                            var s = root.span
+                            root.follow = false
+                            root.viewStart = strip.rangeStart + (x - grab * thumb.width) / strip.width * strip.len
+                            root.viewEnd = root.viewStart + s
+                        }
+                        onPressed: (m) => {
+                            strip.frozen = true
+                            grab = m.x >= thumb.x && m.x <= thumb.x + thumb.width ? (m.x - thumb.x) / thumb.width : 0.5
+                            moveTo(m.x)
+                        }
+                        onPositionChanged: (m) => { if (pressed) moveTo(m.x) }
+                        onReleased: { strip.frozen = false; strip.update() }
+                        ToolTip.visible: containsMouse && !pressed
+                        ToolTip.delay: 800
+                        ToolTip.text: "Drag to move along the timeline. Mouse wheel on the timeline zooms; double-click zooms in."
                     }
                 }
 
@@ -540,13 +654,38 @@ Rectangle {
                     y: -height - 6
                     x: dateBtn.width - width
                     selected: new Date(root.pos)
-                    onPicked: (d) => {
-                        // Jump to the start of that day and show the whole day.
+                    cameraId: root.cameraId
+                    onPicked: (d, first) => {
+                        // Show the whole day and play from its first footage.
+                        var end = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).getTime()
+                        root.zoomTo(end - d.getTime(), d.getTime(), 0)
                         root.follow = true
-                        Clock.seek(d.getTime())
-                        root.zoomTo(86400000, d.getTime(), 0)
+                        Clock.seek(first > 0 ? first : d.getTime())
                     }
                 }
+            }
+            // Playback and zoom: −30 s, play / pause, +30 s, speed, zoom out / in.
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 3
+                IconButton { text: "−30 s"; size: 22; tip: "Back 30 seconds"; enabled: Api.canPlayback; onClicked: { root.follow = true; Clock.step(-30000) } }
+                IconButton {
+                    iconKind: Clock.playing ? "pause" : "play"; iconSize: 11; size: 22
+                    tip: Clock.playing ? "Pause (Space)" : "Play (Space)"
+                    enabled: Api.canPlayback
+                    onClicked: Clock.togglePlay()
+                }
+                IconButton { text: "+30 s"; size: 22; tip: "Forward 30 seconds"; enabled: Api.canPlayback && !Clock.live; onClicked: { root.follow = true; Clock.step(30000) } }
+                IconButton {
+                    text: (Clock.live ? 1 : Clock.speed) + "×"; size: 22
+                    tip: "Playback speed: click for faster (1×, 2×, 4×, 8×, 16×)"
+                    enabled: !Clock.live
+                    active: !Clock.live && Clock.speed > 1
+                    onClicked: { var v = [1, 2, 4, 8, 16]; Clock.speed = v[(v.indexOf(Clock.speed) + 1) % v.length] }
+                }
+                Item { Layout.fillWidth: true }
+                IconButton { text: "−"; size: 22; tip: "Zoom out (or scroll the mouse wheel on the timeline)"; onClicked: root.zoomTo(root.span * 2, root.pos, 0.5) }
+                IconButton { text: "+"; size: 22; tip: "Zoom in on the playhead"; onClicked: root.zoomTo(root.span / 2, root.pos, 0.5) }
             }
             RowLayout {
                 Layout.fillWidth: true
@@ -554,6 +693,13 @@ Rectangle {
                 IconButton { text: "1h"; size: 20; tip: "Zoom to 1 hour"; onClicked: root.zoomTo(3600000, root.pos, 0.75) }
                 IconButton { text: "1d"; size: 20; tip: "Zoom to 1 day"; onClicked: root.zoomTo(86400000, root.pos, 0.75) }
                 IconButton { text: "7d"; size: 20; tip: "Zoom to 1 week"; onClicked: root.zoomTo(7 * 86400000, root.pos, 0.85) }
+                IconButton {
+                    text: "Day"; size: 20; tip: "Show the whole day of the playhead"
+                    onClicked: {
+                        var p = new Date(root.pos), a = new Date(p.getFullYear(), p.getMonth(), p.getDate())
+                        root.zoomTo(new Date(p.getFullYear(), p.getMonth(), p.getDate() + 1).getTime() - a.getTime(), a.getTime(), 0)
+                    }
+                }
                 Item { Layout.fillWidth: true }
                 // Back to live (only while playing back).
                 AbstractButton {

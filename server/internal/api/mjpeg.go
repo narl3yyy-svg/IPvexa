@@ -18,12 +18,15 @@ import (
 //	                              only where the browser supports it)
 //
 // Both take ?t=<ms> for the recording from that moment (sent in real time);
-// without it they stream live. mjpeg also takes &w=<width> and &fps=<1-15>.
+// without it they stream live; &speed=<1-16> plays the recording faster. mjpeg
+// also takes &w=<width> and &fps=<1-15>.
 func (s *Server) mjpeg(w http.ResponseWriter, r *http.Request) {
 	width := min(max(queryInt(r, "w", 640), 160), 1280)
 	fps := min(max(queryInt(r, "fps", 6), 1), 15)
+	// A faster recording (?speed=) keeps the same number of pictures a second.
+	speed := min(max(queryInt(r, "speed", 1), 1), 16)
 	s.browserStream(w, r, "sub", []string{"-an", "-sn", "-threads", "1",
-		"-vf", fmt.Sprintf("fps=%d,scale='min(%d,iw)':-2", fps, width),
+		"-vf", fmt.Sprintf("setpts=PTS/%d,fps=%d,scale='min(%d,iw)':-2", speed, fps, width),
 		"-q:v", "7", "-f", "mpjpeg", "-boundary_tag", "ipvexa", "pipe:1"},
 		"multipart/x-mixed-replace;boundary=ipvexa")
 }
@@ -62,7 +65,10 @@ func (s *Server) browserStream(w http.ResponseWriter, r *http.Request, stream st
 		}
 		defer os.Remove(list)
 		w.Header().Set("X-Ipvexa-Start", strconv.FormatInt(startWall, 10))
-		args := append([]string{"-hide_banner", "-loglevel", "error", "-nostdin", "-re",
+		// ?speed= plays recordings faster (2×, 4×…): ffmpeg reads them that much
+		// faster than real time; the browser speeds up the video to match.
+		speed := min(max(queryInt(r, "speed", 1), 1), 16)
+		args := append([]string{"-hide_banner", "-loglevel", "error", "-nostdin", "-readrate", strconv.FormatInt(speed, 10),
 			"-f", "concat", "-safe", "0", "-i", list}, out...)
 		cmd = exec.CommandContext(r.Context(), s.FFmpeg, args...)
 	} else {

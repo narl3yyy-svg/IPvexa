@@ -346,6 +346,51 @@ func (s *Store) AddSegment(seg *Segment) error {
 	return nil
 }
 
+// DaySummary is how much of one time range (a day, for the calendar) was recorded.
+type DaySummary struct {
+	Start    int64 `json:"start"`
+	Recorded int64 `json:"rec_ms"` // milliseconds of footage
+	First    int64 `json:"first"`  // start of the first footage in the range (0 = none)
+	Motion   int   `json:"motion"` // motion events that started in the range
+}
+
+// maxSegmentMs bounds how long one recording segment can be (they are a minute
+// long), so a range query only has to look this far back.
+const maxSegmentMs = 3600 * 1000
+
+// Days summarises the ranges [bounds[i], bounds[i+1]) of one camera: footage
+// (main or substream, whichever has more) and motion.
+func (s *Store) Days(camID int64, bounds []int64) ([]DaySummary, error) {
+	out := make([]DaySummary, 0, len(bounds))
+	for i := 0; i+1 < len(bounds); i++ {
+		a, b := bounds[i], bounds[i+1]
+		d := DaySummary{Start: a}
+		rows, err := s.db.Query(`SELECT COALESCE(SUM(MIN(end_ms, ?) - MAX(start_ms, ?)), 0), COALESCE(MIN(start_ms), 0)
+			FROM segments WHERE camera_id = ? AND start_ms >= ? AND start_ms < ? AND end_ms > ? GROUP BY stream`,
+			b, a, camID, a-maxSegmentMs, b, a)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var rec, first int64
+			if err := rows.Scan(&rec, &first); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			if rec > d.Recorded {
+				d.Recorded, d.First = rec, max(first, a)
+			}
+		}
+		rows.Close()
+		if err := s.db.QueryRow(`SELECT COUNT(*) FROM events WHERE camera_id = ? AND kind = 'motion' AND start_ms >= ? AND start_ms < ?`,
+			camID, a, b).Scan(&d.Motion); err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, nil
+}
+
 // Segments returns segments of one camera stream overlapping [from, to), oldest first.
 func (s *Store) Segments(camID int64, stream string, from, to int64) ([]Segment, error) {
 	rows, err := s.db.Query(`SELECT id, camera_id, stream, path, start_ms, end_ms, size FROM segments

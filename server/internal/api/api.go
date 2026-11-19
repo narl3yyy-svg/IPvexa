@@ -79,6 +79,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/cameras/{id}/fmp4", auth("viewer", s.camPerm("", s.fmp4)))
 	mux.Handle("GET /api/cameras/{id}/timeline", auth("viewer", s.camPerm("playback", s.timeline)))
 	mux.Handle("GET /api/cameras/{id}/playback", auth("viewer", s.camPerm("playback", s.playback)))
+	mux.Handle("GET /api/cameras/{id}/days", auth("viewer", s.camPerm("playback", s.days)))
 	mux.Handle("GET /api/discover", auth("admin", s.discover))
 	mux.Handle("POST /api/onvif/probe", auth("admin", s.onvifProbe))
 	mux.Handle("GET /api/cameras/{id}/ptz/check", auth("viewer", s.camPerm("ptz", s.ptzCheck)))
@@ -633,6 +634,54 @@ func (s *Server) timeline(w http.ResponseWriter, r *http.Request) {
 		add(start, now)
 	}
 	writeJSON(w, 200, map[string]any{"from": from, "to": to, "chunks": chunks})
+}
+
+// days: GET /api/cameras/{id}/days?bounds=<ms>,<ms>,... (ascending, up to 63 values,
+// usually local midnights) returns, for each range between two bounds, how much
+// was recorded, where the footage starts and how many motion events there were.
+// The calendar uses it to mark (and only offer) days with recordings.
+func (s *Server) days(w http.ResponseWriter, r *http.Request) {
+	id, _ := pathID(r)
+	parts := strings.Split(r.URL.Query().Get("bounds"), ",")
+	if len(parts) < 2 || len(parts) > 63 {
+		writeErr(w, 400, "bounds: give 2 to 63 times")
+		return
+	}
+	bounds := make([]int64, len(parts))
+	for i, p := range parts {
+		v, err := strconv.ParseInt(strings.TrimSpace(p), 10, 64)
+		if err != nil || (i > 0 && v <= bounds[i-1]) {
+			writeErr(w, 400, "bounds must be ascending times in milliseconds")
+			return
+		}
+		bounds[i] = v
+	}
+	list, err := s.Store.Days(id, bounds)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	// Footage being recorded right now is not indexed yet.
+	now := time.Now().UnixMilli()
+	for _, stream := range []string{"main", "sub"} {
+		_, start, ok := s.Cams.OpenSegment(id, stream)
+		if !ok {
+			continue
+		}
+		for i := range list {
+			a, b := bounds[i], bounds[i+1]
+			if now <= a || start >= b {
+				continue
+			}
+			from := max(start, a)
+			list[i].Recorded += min(now, b) - from
+			if list[i].First == 0 || from < list[i].First {
+				list[i].First = from
+			}
+		}
+		break
+	}
+	writeJSON(w, 200, map[string]any{"days": list})
 }
 
 // tsOffset shifts playback timestamps so frames before the seek point (from the

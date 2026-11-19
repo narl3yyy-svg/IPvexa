@@ -743,7 +743,7 @@ Item {
             id: timeline
             visible: Api.canPlayback && !root.fullscreenMode
             Layout.fillWidth: true
-            Layout.preferredHeight: 92
+            Layout.preferredHeight: 122
             cameraId: root.selectedCamera
             cameraName: (Theme.findCamera(Api.cameras, root.selectedCamera) || {}).name || ""
             searchCells: root.searchCam === root.selectedCamera ? root.searchCells : ""
