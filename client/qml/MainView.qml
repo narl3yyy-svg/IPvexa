@@ -854,7 +854,7 @@ Item {
     }
     PasswordDialog { id: passwordDialog }
     BookmarkDialog { id: bookmarkDialog; onAdded: timeline.fetch() }
-    ExportDialog { id: exportDialog }
+    ExportDialog { id: exportDialog; saveDir: saveDialog.saveDir }
     SaveVideoDialog { id: saveDialog }
     // Cameras on the layout, once each: [{id, name}].
     function layoutCameras() {

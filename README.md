@@ -31,7 +31,7 @@ Everything runs on your own hardware. IPvexa never contacts the internet: there 
 |---|---|
 | **Recording** | Continuous or motion-only recording with no re-encoding, so quality is untouched and CPU use stays low. Weekly schedules, per-camera retention, storage limits, and a second disk if you want one. |
 | **Live view** | Free-form layouts with resizable tiles, auto-arrange, digital zoom, tours and video walls on extra monitors. A distraction-free full-screen mode shows only the cameras. Live video stays in real time. |
-| **Playback** | Synced playback of every camera on a zoomable timeline, at 1–16× speed, in reverse and frame by frame. It includes thumbnail previews, bookmarks and clip export. |
+| **Playback** | Synced playback of every camera on a zoomable timeline, at 1–16× speed, in reverse and frame by frame. A calendar marks the days with recordings, and a motion list shows every clip in view. Select part of the timeline to **save video** from one camera, every synced camera, or all of them in one grid video. |
 | **Motion** | Motion detection that learns and ignores swaying trees and flags. It has masks, sensitivity control, and **smart search** that finds motion in any area you draw. |
 | **AI detection** | Local AI tells people, vehicles and animals apart. Each camera can record and alert only on **people**, **vehicles**, **people and vehicles**, or **anything**. Parked cars, trees and shadows are ignored. It runs on the server; nothing leaves your network. |
 | **Cameras** | Works with Dahua/Amcrest, Hikvision/Annke, Reolink, OpenIPC, Thingino and any RTSP or ONVIF camera. ONVIF discovery and stream detection, plus PTZ with presets. |
@@ -147,12 +147,21 @@ Open **IPvexa**, sign in with the password the installer printed, and change it 
 <summary><b>Timeline and playback</b></summary>
 
 - **Colors:** green is recorded footage, red is motion and amber flags are bookmarks.
-- **Navigating:** scroll to zoom, drag to pan, click to jump. Hover over footage for a picture preview. Clicking the date opens a calendar.
-- **Bookmarks and clips:** right-click the timeline to bookmark a moment or export a clip.
+- **Navigating:** the ruler shows the day above the time. Scroll or double-click to zoom, drag to pan, click to jump, or drag the strip underneath to move through the days. Hover over footage for a picture preview. The length menu (for example **1h ▾**) shows 1 hour, 1 day, 1 week or the whole day.
+- **Calendar:** click the date beside the clock. Days with recordings are marked (red when there was motion) and only those can be picked. Hover a day to see the hours recorded and the motion count. Picking one shows the whole day and plays from its first footage.
+- **Motion list:** the **Motion** tab in the right panel lists every motion clip in the part of the timeline on screen, with a thumbnail, the time, the length and what the AI saw. **All / People / Vehicles** filters it, the clip being played is highlighted, and clicking a clip plays it.
+- **Saving video:**
+  1. **Shift+drag** on the timeline to select a part (or right-click › **Start selection here** / **End selection here**). Drag the edges of the blue band to adjust it.
+  2. Right-click any video, or click **Save…** in the bar above the timeline.
+  3. Choose **just this camera**, **every synced camera as separate files**, or **every synced camera in one grid video** with names and the date and time. **Change…** picks the folder; the app remembers it.
+
+  Single and separate files are copied as recorded, so they are ready in seconds. The grid video is made on the server and takes about as long as the clip. Up to 2 hours at a time.
+- **Bookmarks:** right-click the timeline to bookmark a moment.
 - **Sync:** plays every camera on the layout at the same moment. With Sync off, only the selected camera plays back and the others stay live.
 - **Controls:**
-  - **◀ ▶** jump between events, and **◂◂** plays backwards.
-  - **‹| |›** (or **,** and **.**) step one frame.
+  - The large clock shows the time of the playhead, and **LIVE** or **Go live** sits on the right.
+  - **⏮ ⏭** jump between events, **−30 / +30** skip 30 seconds, and **‹| |›** (or **,** and **.**) step one frame.
+  - **1×** steps through 2×, 4×, 8× and 16×, and **◂◂** plays backwards.
   - **Space** plays and pauses, **← / →** jumps 10 seconds, and **L** goes live.
 
 </details>
@@ -197,7 +206,9 @@ Open **IPvexa**, sign in with the password the installer printed, and change it 
 
 Open `http://<server>:7480` in any browser. No app or plugin is needed.
 
-- **Live, playback and events:** a camera grid, a single-camera view with playback, and the last 24 hours of events.
+- **Live and playback:** a camera grid, and a single-camera view with the same timeline, calendar and controls as the desktop app. Tap the timeline to play from a moment (a gap jumps to the next recording), pinch or double-tap to zoom, and pause keeps the picture on screen.
+- **Motion list:** below the timeline, every motion clip in view, with All / People / Vehicles filters.
+- **Saving video:** tap **Select**, drag on the timeline (or Shift+drag with a mouse), then **Save video** downloads that part of the camera in the original quality.
 - **Full quality where possible:** H.264 plays everywhere and H.265 on many phones. Otherwise the page falls back to a lighter picture stream. **SD / HD** switches between the substream and the main stream.
 - **Runs indefinitely:** if a stream is interrupted, the page reconnects by itself within seconds. It also renews the connection every 30 minutes without a visible gap.
 - **⛶ Full screen:** shows only the cameras. Move the mouse or tap to get the exit button.

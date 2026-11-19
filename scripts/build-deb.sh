@@ -111,7 +111,7 @@ build_client() {
   printf 'Source: ipvexa\n\nPackage: ipvexa\nArchitecture: any\n' > "$WORK/shlib/debian/control"
   local libs
   libs="$(cd "$WORK/shlib" && dpkg-shlibdeps -O "$P/usr/bin/ipvexa" 2>/dev/null | sed -n 's/^shlibs:Depends=//p')"
-  local qml="qml6-module-qtquick, qml6-module-qtquick-controls, qml6-module-qtquick-templates, qml6-module-qtquick-layouts, qml6-module-qtquick-window, qml6-module-qtqml-workerscript, qml6-module-qtmultimedia, qml6-module-qtcore"
+  local qml="qml6-module-qtquick, qml6-module-qtquick-controls, qml6-module-qtquick-templates, qml6-module-qtquick-layouts, qml6-module-qtquick-window, qml6-module-qtqml-workerscript, qml6-module-qtmultimedia, qml6-module-qtcore, qml6-module-qtquick-dialogs"
   mkdir -p "$P/DEBIAN"
   cat > "$P/DEBIAN/control" <<EOF
 Package: ipvexa

@@ -13,6 +13,7 @@ AppDialog {
     property real received: 0
     property string errorText: ""
     property string savedPath: ""
+    property string saveDir: Api.videosDir()   // MainView passes the folder picked in "Save video"
 
     title: "Export clip"
     subtitle: cameraName
@@ -41,7 +42,7 @@ AppDialog {
         var from = parseStart()
         if (isNaN(from)) { errorText = "Write the start as YYYY-MM-DD HH:MM:SS."; return }
         var to = from + minutes.value * 60000
-        var path = Api.videosDir() + "/" + fileName(from)
+        var path = root.saveDir + "/" + fileName(from)
         running = true; received = 0
         Api.download("/api/cameras/" + cameraId + "/export?from=" + from + "&to=" + to + "&stream=" + (quality.currentIndex === 1 ? "sub" : "main"),
                      path, function (err, file) {
@@ -72,7 +73,7 @@ AppDialog {
         FieldLabel { text: "Save to" }
         Text {
             Layout.fillWidth: true
-            text: Api.videosDir()
+            text: root.saveDir
             color: Theme.textDim
             font.pixelSize: 12
             font.family: Theme.mono

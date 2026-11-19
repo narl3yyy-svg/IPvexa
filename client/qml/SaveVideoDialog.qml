@@ -1,6 +1,8 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Dialogs
+import QtCore
 import Ipvexa
 
 // Save the selected part of the timeline: just one camera, every synced camera as
@@ -22,6 +24,18 @@ AppDialog {
     property string savedPath: ""    // a file, or the folder for "each"
     readonly property real length: to - from
     readonly property bool tooLong: length > 2 * 3600000
+    // Where videos go: the folder last picked here, or the Videos/IPvexa folder.
+    Settings { id: prefs; category: "save"; property string folder: "" }
+    readonly property string saveDir: prefs.folder !== "" ? prefs.folder : Api.videosDir()
+    FolderDialog {
+        id: folderPicker
+        title: "Save videos to"
+        currentFolder: "file://" + (root.saveDir.charAt(0) === "/" ? "" : "/") + root.saveDir
+        onAccepted: {
+            var u = selectedFolder.toString()
+            prefs.folder = decodeURIComponent(u.replace(/^file:\/\/(localhost)?/, ""))
+        }
+    }
 
     title: "Save video"
     subtitle: new Date(from).toLocaleString(Qt.locale(), "ddd d MMM yyyy  HH:mm:ss") + " – "
@@ -51,20 +65,20 @@ AppDialog {
         if (tooLong) { errorText = "Select 2 hours or less."; return }
         running = true
         if (mode === "one") {
-            Api.download(exportPath(cameraId), Api.videosDir() + "/" + safe(cameraName) + "_" + stamp() + ".mp4", function (err, file) {
+            Api.download(exportPath(cameraId), root.saveDir + "/" + safe(cameraName) + "_" + stamp() + ".mp4", function (err, file) {
                 running = false
                 if (err) errorText = err; else savedPath = file
             })
         } else if (mode === "grid") {
             var ids = cameras.map(function (c) { return c.id }).join(",")
             Api.download("/api/export/grid?cameras=" + ids + "&from=" + Math.round(from) + "&to=" + Math.round(to) + "&stream=" + stream(),
-                         Api.videosDir() + "/IPvexa_" + cameras.length + "_cameras_" + stamp() + ".mp4", function (err, file) {
+                         root.saveDir + "/IPvexa_" + cameras.length + "_cameras_" + stamp() + ".mp4", function (err, file) {
                 running = false
                 if (err) errorText = err; else savedPath = file
             })
         } else {
             // One file per camera, one after another, into a folder of their own.
-            var dir = Api.videosDir() + "/IPvexa_" + stamp()
+            var dir = root.saveDir + "/IPvexa_" + stamp()
             var failed = []
             var next = function (i) {
                 if (root.cancelled || i >= root.cameras.length) {
@@ -155,13 +169,29 @@ AppDialog {
             FieldLabel { text: "Quality" }
             ComboBox { id: quality; Layout.preferredWidth: 240; model: ["High (main stream)", "Low (substream, if recorded)"] }
             FieldLabel { text: "Save to" }
-            Text {
+            RowLayout {
                 Layout.fillWidth: true
-                text: Api.videosDir()
-                color: Theme.textDim
-                font.pixelSize: 12
-                font.family: Theme.mono
-                elide: Text.ElideMiddle
+                spacing: 6
+                Text {
+                    Layout.fillWidth: true
+                    text: root.saveDir
+                    color: Theme.textDim
+                    font.pixelSize: 12
+                    font.family: Theme.mono
+                    elide: Text.ElideMiddle
+                    ToolTip.visible: saveDirMa.containsMouse
+                    ToolTip.text: root.saveDir
+                    MouseArea { id: saveDirMa; anchors.fill: parent; hoverEnabled: true }
+                }
+                AppButton { text: "Change…"; onClicked: folderPicker.open() }
+                AppButton {
+                    visible: prefs.folder !== ""
+                    text: "Default"
+                    onClicked: prefs.folder = ""
+                    ToolTip.visible: hovered
+                    ToolTip.delay: 500
+                    ToolTip.text: "Back to " + Api.videosDir()
+                }
             }
         }
         Text {

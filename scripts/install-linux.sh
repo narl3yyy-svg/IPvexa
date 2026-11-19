@@ -97,7 +97,7 @@ if [[ $FAMILY == debian ]]; then
     ffmpeg cmake ninja-build pkg-config build-essential dpkg-dev curl ca-certificates \
     qt6-base-dev qt6-declarative-dev qt6-multimedia-dev \
     qml6-module-qtquick qml6-module-qtquick-controls qml6-module-qtquick-layouts qml6-module-qtquick-window \
-    qml6-module-qtquick-templates qml6-module-qtqml-workerscript qml6-module-qtmultimedia qml6-module-qtcore \
+    qml6-module-qtquick-templates qml6-module-qtqml-workerscript qml6-module-qtmultimedia qml6-module-qtcore qml6-module-qtquick-dialogs \
     libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libva-dev
   if [[ $WHAT != client ]]; then install_go; fi
 
