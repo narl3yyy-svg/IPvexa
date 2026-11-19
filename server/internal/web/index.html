@@ -70,6 +70,11 @@
   .controls button.on { background: #153a4d; color: var(--accent); border-color: #1f5f86; }
   .controls #playBtn { width: 44px; height: 44px; border-radius: 50%; background: var(--accent); border-color: var(--accent); color: #fff; font-size: 16px; padding: 0; }
   .grow { flex: 1; }
+  .selbar { display: flex; align-items: center; gap: 8px; margin-top: 6px; padding: 4px 6px 4px 10px; background: #1f3a52; border: 1px solid #2f6aa0; border-radius: 8px; color: #cfe6ff; font-size: 13px; }
+  .selbar span { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .selbar button { padding: 4px 12px; font-size: 13px; }
+  .selbar #selSave { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  .selbar #selClr { background: transparent; border-color: transparent; color: var(--dim); }
   .spansel { background: transparent; color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 4px 6px; font: inherit; font-size: 13px; }
   .tlwrap { position: relative; padding: 0 10px 2px; }
   .tlhead { display: flex; align-items: center; gap: 10px; padding: 8px 0 6px; }
@@ -169,6 +174,7 @@
       </div>
       <canvas id="tl" aria-label="Timeline: tap to play from a moment, drag to move, pinch or scroll to zoom"></canvas>
       <div id="strip" title="Drag to move along the timeline"><div id="thumb"></div></div>
+      <div class="selbar hidden" id="selBar"><span id="selTxt"></span><button id="selSave">Save video</button><button id="selClr" aria-label="Clear selection">✕</button></div>
       <div class="cal hidden" id="cal"></div>
     </div>
     <div class="controls">
@@ -181,6 +187,7 @@
       </div>
       <div class="row">
         <button id="speedBtn" title="Playback speed: tap for faster">1×</button>
+        <button id="selBtn" title="Select part of the timeline to save: drag on the timeline (or Shift+drag with a mouse)">Select</button>
         <span class="grow"></span>
         <button id="zoomOut" title="Zoom out" aria-label="Zoom out">−</button>
         <select id="spanSel" class="spansel" title="Show 1 hour, 1 day, 1 week, or the whole day" aria-label="Timeline length"><option value="" hidden>2h</option><option value="3600000">1 hour</option><option value="86400000">1 day</option><option value="604800000">1 week</option><option value="day">Whole day</option></select>
@@ -326,6 +333,8 @@ function showCamera(id, t) {
   const canPlay = S.me.role === "admin" || S.perms.playback;
   $("tl").classList.toggle("hidden", !canPlay); $("strip").classList.toggle("hidden", !canPlay); $("dateBtn").disabled = !canPlay;
   ["prevEv", "nextEv", "back30", "fwd30", "playBtn", "speedBtn", "zoomOut", "zoomIn", "spanSel"].forEach((x) => $(x).classList.toggle("hidden", !canPlay));
+  $("selBtn").classList.toggle("hidden", !canPlay || !(S.me.role === "admin" || S.perms.export));
+  TL.sel = null; TL.selMode = false; selUpdate();
   S.speed = 1; S.paused = false; updateSpeed();
   TL.chunks = []; TL.events = []; TL.follow = true;
   tlShow(t || Date.now());
@@ -668,6 +677,15 @@ function tlDraw() {
   }
   g.fillStyle = "#f5a524";
   for (const ev of TL.events) if (ev.kind === "bookmark") { const a = xAt(ev.start); if (a > -4 && a < w + 4) g.fillRect(Math.round(a), laneTop - 4, 2, laneH + 4); }
+  // Selection: a blue band with edges.
+  if (TL.sel) {
+    const a = xAt(TL.sel.a), e = xAt(TL.sel.b);
+    if (e >= 0 && a <= w) {
+      g.fillStyle = "rgba(74,163,255,.22)"; g.fillRect(Math.max(0, a), rowH, Math.min(w, e) - Math.max(0, a), h - rowH);
+      g.fillStyle = "#4aa3ff";
+      for (const x of [a, e]) if (x >= 0 && x <= w) { g.fillRect(Math.round(x) - 1, rowH, 2, h - rowH); g.fillRect(Math.round(x) - 3, laneTop + laneH / 2 - 8, 6, 16); }
+    }
+  }
   // Playhead
   const px = xAt(position());
   if (px >= -2 && px <= w + 2) {
@@ -714,13 +732,25 @@ function tlStrip() {
 // Timeline gestures: tap plays, drag moves, two fingers pinch-zoom, wheel zooms, double-tap zooms in.
 (() => {
   const cv = $("tl"), pts = new Map();
-  let downX = 0, downStart = 0, moved = false, pinch = null, lastTap = 0, tapTimer = 0;
+  let downX = 0, downStart = 0, moved = false, pinch = null, lastTap = 0, tapTimer = 0, sel = "", anchor = 0;
   const timeAt = (x) => { const r = cv.getBoundingClientRect(); return TL.start + ((x - r.left) / r.width) * (TL.end - TL.start); };
+  // Within reach of a selection edge (wider for fingers).
+  const edgeAt = (e) => {
+    if (!TL.sel) return "";
+    const r = cv.getBoundingClientRect(), reach = e.pointerType === "touch" ? 14 : 6;
+    const xa = r.left + ((TL.sel.a - TL.start) / (TL.end - TL.start)) * r.width, xb = r.left + ((TL.sel.b - TL.start) / (TL.end - TL.start)) * r.width;
+    return Math.abs(e.clientX - xa) <= reach ? "a" : Math.abs(e.clientX - xb) <= reach ? "b" : "";
+  };
   cv.addEventListener("pointerdown", (e) => {
-    cv.setPointerCapture(e.pointerId);
+    try { cv.setPointerCapture(e.pointerId); } catch (err) {}
     pts.set(e.pointerId, e.clientX);
-    if (pts.size === 1) { downX = e.clientX; downStart = TL.start; moved = false; }
+    if (pts.size === 1) {
+      downX = e.clientX; downStart = TL.start; moved = false;
+      sel = edgeAt(e) || (TL.selMode || e.shiftKey ? "new" : "");
+      anchor = Math.round(timeAt(e.clientX));
+    }
     if (pts.size === 2) {
+      sel = "";
       const [a, b] = [...pts.values()];
       pinch = { dist: Math.abs(a - b) || 1, span: TL.end - TL.start, anchor: timeAt((a + b) / 2) };
       moved = true;
@@ -736,6 +766,14 @@ function tlStrip() {
       return;
     }
     if (Math.abs(e.clientX - downX) > 5) moved = true;
+    if (moved && sel) {
+      const t = Math.round(timeAt(Math.max(r.left, Math.min(r.right, e.clientX))));
+      if (sel === "new") TL.sel = { a: Math.min(anchor, t), b: Math.max(anchor, t) };
+      else if (sel === "a") TL.sel = t < TL.sel.b ? { a: t, b: TL.sel.b } : (sel = "b", { a: TL.sel.b, b: t });
+      else TL.sel = t > TL.sel.a ? { a: TL.sel.a, b: t } : (sel = "a", { a: t, b: TL.sel.a });
+      selUpdate(); tlDraw();
+      return;
+    }
     if (moved && !pinch) {
       const span = TL.end - TL.start;
       TL.follow = false;
@@ -748,6 +786,14 @@ function tlStrip() {
     pts.delete(e.pointerId);
     if (pts.size > 0) return;
     const wasPinch = !!pinch; pinch = null;
+    if (sel && moved) {
+      sel = "";
+      if (TL.sel && TL.sel.b - TL.sel.a < 1000) TL.sel = null;
+      else { TL.selMode = false; }
+      selUpdate(); tlDraw();
+      return;
+    }
+    sel = "";
     if (moved || wasPinch || e.type === "pointercancel") return;
     const r = cv.getBoundingClientRect(), t = Math.round(timeAt(e.clientX));
     // A second tap soon after zooms in there instead of playing.
@@ -763,6 +809,34 @@ function tlStrip() {
   }, { passive: false });
   window.addEventListener("resize", () => tlDraw());
 })();
+
+// ---------- Selection: save part of the timeline as a video ----------
+function fmtLen(ms) {
+  let s = Math.round(ms / 1000);
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+  s %= 60;
+  return h ? `${h} h ${m} min` : m ? `${m} min${s ? " " + s + " s" : ""}` : `${s} s`;
+}
+function selUpdate() {
+  $("selBtn").classList.toggle("on", !!TL.selMode);
+  $("selBtn").textContent = TL.selMode ? "Drag on the timeline" : "Select";
+  const has = !!TL.sel;
+  $("selBar").classList.toggle("hidden", !has);
+  if (!has) return;
+  const len = TL.sel.b - TL.sel.a, hm = { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false };
+  $("selTxt").textContent = `${new Date(TL.sel.a).toLocaleTimeString([], hm)} – ${new Date(TL.sel.b).toLocaleTimeString([], hm)} · ${fmtLen(len)}`;
+  $("selSave").disabled = len > 2 * 3600000;
+  $("selSave").title = len > 2 * 3600000 ? "Select 2 hours or less" : "Save this part of " + S.cam.name + " (original quality)";
+}
+$("selBtn").onclick = () => { TL.selMode = !TL.selMode; selUpdate(); };
+$("selClr").onclick = () => { TL.sel = null; TL.selMode = false; selUpdate(); tlDraw(); };
+$("selSave").onclick = () => {
+  if (!TL.sel || !S.cam) return;
+  const a = document.createElement("a");
+  a.href = withToken(`/api/cameras/${S.cam.id}/export?from=${TL.sel.a}&to=${TL.sel.b}&stream=main`);
+  a.download = "";
+  document.body.appendChild(a); a.click(); a.remove();
+};
 
 // ---------- Calendar: only days with recordings can be picked ----------
 const CAL = { year: 0, month: 0, days: null, gen: 0 };

@@ -299,48 +299,15 @@ func (s *Server) export(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 404, "camera not found")
 		return
 	}
-	segs, err := s.Store.Segments(id, stream, from, to)
+	list, _, err := s.exportList(id, stream, from, to, false)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeErr(w, 404, err.Error())
 		return
 	}
-	type part struct {
-		path       string
-		start, end int64
-	}
-	var parts []part
-	for _, g := range segs {
-		parts = append(parts, part{g.File(s.RecRoot), g.Start, g.End})
-	}
-	if p, start, ok := s.Cams.OpenSegment(id, stream); ok && start < to {
-		parts = append(parts, part{p, start, time.Now().UnixMilli()})
-	}
-	if len(parts) == 0 {
-		writeErr(w, 404, "no recording in that time range")
-		return
-	}
-	var list strings.Builder
-	list.WriteString("ffconcat version 1.0\n")
-	for _, p := range parts {
-		fmt.Fprintf(&list, "file '%s'\n", strings.ReplaceAll(p.path, "'", `'\''`))
-		if from > p.start {
-			fmt.Fprintf(&list, "inpoint %.3f\n", float64(from-p.start)/1000)
-		}
-		if to < p.end {
-			fmt.Fprintf(&list, "outpoint %.3f\n", float64(to-p.start)/1000)
-		}
-	}
-	tmp, err := os.CreateTemp("", "ipvexa-export-*.ffconcat")
-	if err != nil {
-		writeErr(w, 500, err.Error())
-		return
-	}
-	tmp.WriteString(list.String())
-	tmp.Close()
-	defer os.Remove(tmp.Name())
+	defer os.Remove(list)
 
 	cmd := exec.CommandContext(r.Context(), s.FFmpeg, "-hide_banner", "-loglevel", "error", "-nostdin",
-		"-f", "concat", "-safe", "0", "-i", tmp.Name(),
+		"-f", "concat", "-safe", "0", "-i", list,
 		"-map", "0:v:0", "-map", "0:a?", "-c", "copy",
 		"-movflags", "frag_keyframe+empty_moov+default_base_moof", "-f", "mp4", "pipe:1")
 	cmd.WaitDelay = 2 * time.Second
@@ -366,4 +333,49 @@ func (s *Server) export(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("export ffmpeg", "camera", id, "msg", msg)
 	}
 	s.audit(r, "export", fmt.Sprintf("%s %s, %s", cam.Name, time.UnixMilli(from).Format(time.DateTime), time.Duration(to-from)*time.Millisecond))
+}
+
+// exportList writes an ffconcat list of the recording of one camera between from
+// and to and returns its path and the start of the first footage. With keepGaps,
+// each file is given the length up to the next one, so the list's timestamps keep
+// wall-clock spacing (gaps stay gaps) — needed to line several cameras up.
+func (s *Server) exportList(id int64, stream string, from, to int64, keepGaps bool) (string, int64, error) {
+	segs, err := s.Store.Segments(id, stream, from, to)
+	if err != nil {
+		return "", 0, err
+	}
+	type part struct {
+		path       string
+		start, end int64
+	}
+	var parts []part
+	for _, g := range segs {
+		parts = append(parts, part{g.File(s.RecRoot), g.Start, g.End})
+	}
+	if p, start, ok := s.Cams.OpenSegment(id, stream); ok && start < to {
+		parts = append(parts, part{p, start, time.Now().UnixMilli()})
+	}
+	if len(parts) == 0 {
+		return "", 0, fmt.Errorf("no recording in that time range")
+	}
+	var list strings.Builder
+	list.WriteString("ffconcat version 1.0\n")
+	for i, p := range parts {
+		fmt.Fprintf(&list, "file '%s'\n", strings.ReplaceAll(p.path, "'", `'\''`))
+		if from > p.start {
+			fmt.Fprintf(&list, "inpoint %.3f\n", float64(from-p.start)/1000)
+		}
+		if keepGaps && i+1 < len(parts) {
+			fmt.Fprintf(&list, "duration %.3f\n", float64(min(parts[i+1].start, to)-max(p.start, from))/1000)
+		} else if to < p.end {
+			fmt.Fprintf(&list, "outpoint %.3f\n", float64(to-p.start)/1000)
+		}
+	}
+	tmp, err := os.CreateTemp("", "ipvexa-export-*.ffconcat")
+	if err != nil {
+		return "", 0, err
+	}
+	tmp.WriteString(list.String())
+	tmp.Close()
+	return tmp.Name(), max(parts[0].start, from), nil
 }

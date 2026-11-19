@@ -61,6 +61,8 @@ Rectangle {
     property bool selectingArea: false
     property bool editable: true      // false: no moving, resizing or removing (video walls)
     property string searchCells: ""   // area being searched on this tile (hex), shown as an outline
+    property string selectionText: "" // the timeline's selection ("" = none), offered for saving
+    property int syncedCameras: 1     // cameras on the layout that play in step
 
     signal clicked()
     signal maximizeToggled()
@@ -77,6 +79,7 @@ Rectangle {
     signal tileDropped(int fromIndex)
     signal resizeMoved(point scenePos)
     signal resizeFinished(point scenePos)
+    signal saveSelectionRequested(bool all)
 
     function offlineReason() {
         var e = root.mainStatus && root.mainStatus.last_error ? root.mainStatus.last_error : ""
@@ -510,6 +513,23 @@ Rectangle {
 
     Menu {
         id: tileMenu
+        // The part of the timeline selected (Shift+drag on the timeline): save it.
+        MenuItem {
+            visible: root.selectionText !== "" && Api.canExport; height: visible ? implicitHeight : 0
+            enabled: false
+            text: "Selection · " + root.selectionText
+        }
+        MenuItem {
+            visible: root.selectionText !== "" && Api.canExport; height: visible ? implicitHeight : 0
+            text: "Save " + (root.cam ? root.cam.name : "this camera") + "…"
+            onTriggered: root.saveSelectionRequested(false)
+        }
+        MenuItem {
+            visible: root.selectionText !== "" && Api.canExport && root.syncedCameras > 1; height: visible ? implicitHeight : 0
+            text: "Save all " + root.syncedCameras + " synced cameras…"
+            onTriggered: root.saveSelectionRequested(true)
+        }
+        MenuSeparator { visible: root.selectionText !== "" && Api.canExport; height: visible ? implicitHeight : 0 }
         MenuItem { text: root.maximized ? "Restore" : "Maximize"; onTriggered: root.maximizeToggled() }
         MenuItem { text: "Full screen"; onTriggered: root.fullscreenRequested() }
         MenuSeparator {}

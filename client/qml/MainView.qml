@@ -682,6 +682,12 @@ Item {
                     liveBufferMs: root.liveBufferMs
                     syncPlayback: root.syncPlayback
                     searchCells: root.searchCells
+                    selectionText: timeline.hasSel
+                        ? new Date(timeline.selStart).toLocaleTimeString(Qt.locale(), "HH:mm:ss") + " – "
+                          + new Date(timeline.selEnd).toLocaleTimeString(Qt.locale(), "HH:mm:ss") + " (" + timeline.fmtLength(timeline.selEnd - timeline.selStart) + ")"
+                        : ""
+                    syncedCameras: root.syncPlayback ? root.layoutCameras().length : 1
+                    onSaveSelectionRequested: (i, all) => root.saveSelection(root.cur.items[i].cam, all)
                     searchIndex: {
                         for (var i = 0; i < root.cur.items.length; i++) if (root.cur.items[i].cam === root.searchCam) return i
                         return -1
@@ -760,6 +766,7 @@ Item {
             onSearchCleared: { root.searchCam = 0; root.searchCells = "" }
             onBookmarkRequested: (t) => bookmarkDialog.openAt(cameraId, cameraName, t)
             onExportRequested: (from, to) => exportDialog.openAt(cameraId, cameraName, from, to)
+            onSaveRequested: root.saveSelection(cameraId, root.syncPlayback)
         }
     }
 
@@ -848,6 +855,25 @@ Item {
     PasswordDialog { id: passwordDialog }
     BookmarkDialog { id: bookmarkDialog; onAdded: timeline.fetch() }
     ExportDialog { id: exportDialog }
+    SaveVideoDialog { id: saveDialog }
+    // Cameras on the layout, once each: [{id, name}].
+    function layoutCameras() {
+        var seen = [], out = []
+        root.cur.items.forEach(function (it) {
+            if (it.cam > 0 && seen.indexOf(it.cam) < 0) {
+                seen.push(it.cam)
+                var c = Theme.findCamera(Api.cameras, it.cam)
+                if (c) out.push({ id: c.id, name: c.name })
+            }
+        })
+        return out
+    }
+    function saveSelection(camId, all) {
+        if (!timeline.hasSel) return
+        var c = Theme.findCamera(Api.cameras, camId)
+        var cams = root.syncPlayback ? layoutCameras() : []
+        saveDialog.openFor(camId, c ? c.name : "Camera " + camId, cams, timeline.selStart, timeline.selEnd, all)
+    }
     NotificationsDialog { id: notificationsDialog }
     AuditDialog { id: auditDialog }
     ServerSettingsDialog { id: serverSettingsDialog }

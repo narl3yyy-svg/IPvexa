@@ -95,6 +95,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/events/{id}/thumb", auth("viewer", s.eventThumb))
 	mux.Handle("DELETE /api/events/{id}", auth("viewer", s.deleteEvent))
 	mux.Handle("GET /api/cameras/{id}/export", auth("viewer", s.camPerm("export", s.export)))
+	mux.Handle("GET /api/export/grid", auth("viewer", s.exportGrid))
 	mux.Handle("GET /api/audit", auth("admin", s.auditLog))
 	mux.Handle("GET /api/settings", auth("admin", s.getSettings))
 	mux.Handle("PUT /api/settings", auth("admin", s.putSettings))

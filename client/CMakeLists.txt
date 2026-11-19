@@ -59,6 +59,7 @@ qt_add_qml_module(ipvexa
         qml/CalendarPopup.qml
         qml/BookmarkDialog.qml
         qml/ExportDialog.qml
+        qml/SaveVideoDialog.qml
         qml/MotionZoneEditor.qml
         qml/NotificationsDialog.qml
         qml/AuditDialog.qml

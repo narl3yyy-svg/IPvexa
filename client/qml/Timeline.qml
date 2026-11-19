@@ -27,6 +27,23 @@ Rectangle {
     signal syncToggled()
     signal bookmarkRequested(real time)
     signal exportRequested(real from, real to)
+    signal saveRequested(real from, real to)
+    // Selected part of the timeline (Shift+drag, or right-click "Start / End selection here").
+    property real selStart: 0
+    property real selEnd: 0
+    readonly property bool hasSel: selEnd > selStart
+    onSelStartChanged: canvas.requestPaint()
+    onSelEndChanged: canvas.requestPaint()
+    function clearSelection() { selStart = 0; selEnd = 0 }
+    function setSelection(a, b) {
+        if (b < a) { var t = a; a = b; b = t }
+        selStart = Math.round(a); selEnd = Math.round(b)
+    }
+    function fmtLength(ms) {
+        var s = Math.round(ms / 1000), h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60)
+        s = s % 60
+        return h > 0 ? h + " h " + m + " min" : m > 0 ? m + " min" + (s > 0 ? " " + s + " s" : "") : s + " s"
+    }
     signal searchCleared()
     readonly property int motionCount: {
         var n = 0
@@ -310,6 +327,18 @@ Rectangle {
                         ctx.fill()
                     }
 
+                    // Selection: a blue band with edges and grips.
+                    if (root.hasSel) {
+                        var sa = xAt(root.selStart), sb = xAt(root.selEnd)
+                        if (sb >= 0 && sa <= w) {
+                            ctx.fillStyle = "#334aa3ff"
+                            ctx.fillRect(Math.max(0, sa), rowH, Math.min(w, sb) - Math.max(0, sa), h - rowH)
+                            ctx.fillStyle = "#4aa3ff"
+                            if (sa >= 0) { ctx.fillRect(Math.round(sa) - 1, rowH, 2, h - rowH); ctx.fillRect(Math.round(sa) - 3, laneTop + laneH / 2 - 7, 6, 14) }
+                            if (sb <= w) { ctx.fillRect(Math.round(sb) - 1, rowH, 2, h - rowH); ctx.fillRect(Math.round(sb) - 3, laneTop + laneH / 2 - 7, 6, 14) }
+                        }
+                    }
+
                     // Hover line
                     if (hoverX >= 0) {
                         ctx.strokeStyle = "#80ffffff"
@@ -335,7 +364,18 @@ Rectangle {
                     property real pressX: 0
                     property real pressStart: 0
                     property bool moved: false
-                    cursorShape: pressed && moved ? Qt.ClosedHandCursor : Qt.PointingHandCursor
+                    // "" (pan / click) | "new" (Shift+drag) | "start" / "end" (moving an edge)
+                    property string selMode: ""
+                    property real selAnchor: 0
+                    function edgeAt(x) {
+                        if (!root.hasSel) return ""
+                        if (Math.abs(x - canvas.xAt(root.selStart)) <= 5) return "start"
+                        if (Math.abs(x - canvas.xAt(root.selEnd)) <= 5) return "end"
+                        return ""
+                    }
+                    property string hoverEdge: ""
+                    cursorShape: selMode !== "" || hoverEdge !== "" ? Qt.SizeHorCursor
+                               : pressed && moved ? Qt.ClosedHandCursor : Qt.PointingHandCursor
 
                     acceptedButtons: Qt.LeftButton | Qt.RightButton
                     onPressed: (m) => {
@@ -345,10 +385,26 @@ Rectangle {
                             return
                         }
                         pressX = m.x; pressStart = root.viewStart; moved = false
+                        var edge = edgeAt(m.x)
+                        if (edge !== "") selMode = edge
+                        else if (m.modifiers & Qt.ShiftModifier) { selMode = "new"; selAnchor = canvas.timeAt(m.x); root.setSelection(selAnchor, selAnchor) }
+                        else selMode = ""
                     }
                     onPositionChanged: (m) => {
                         canvas.hoverX = m.x
-                        if (pressed) {
+                        if (!pressed) hoverEdge = edgeAt(m.x)
+                        if (pressed && selMode !== "") {
+                            moved = moved || Math.abs(m.x - pressX) > 2
+                            var t = canvas.timeAt(Math.max(0, Math.min(width, m.x)))
+                            if (selMode === "new") root.setSelection(selAnchor, t)
+                            else if (selMode === "start") {
+                                if (t < root.selEnd) root.selStart = Math.round(t)
+                                else { root.selStart = root.selEnd; root.selEnd = Math.round(t); selMode = "end" }
+                            } else {
+                                if (t > root.selStart) root.selEnd = Math.round(t)
+                                else { root.selEnd = root.selStart; root.selStart = Math.round(t); selMode = "start" }
+                            }
+                        } else if (pressed) {
                             if (Math.abs(m.x - pressX) > 4) moved = true
                             if (moved) {
                                 root.follow = false
@@ -362,6 +418,11 @@ Rectangle {
                     onExited: { canvas.hoverX = -1; canvas.requestPaint() }
                     onReleased: (m) => {
                         if (m.button !== Qt.LeftButton) return
+                        if (selMode !== "") {
+                            selMode = ""
+                            if (root.selEnd - root.selStart < 1000) root.clearSelection()   // a Shift+click, not a drag
+                            return
+                        }
                         if (!moved) {
                             root.follow = true
                             Clock.seek(Math.round(canvas.timeAt(m.x)))
@@ -450,7 +511,7 @@ Rectangle {
                         onReleased: { strip.frozen = false; strip.update() }
                         ToolTip.visible: containsMouse && !pressed
                         ToolTip.delay: 800
-                        ToolTip.text: "Drag to move along the timeline. Mouse wheel on the timeline zooms; double-click zooms in."
+                        ToolTip.text: "Drag to move along the timeline. Mouse wheel on the timeline zooms; double-click zooms in; Shift+drag selects a part to save."
                     }
                 }
 
@@ -459,10 +520,81 @@ Rectangle {
                     property real time: 0
                     MenuItem { text: "Play from here"; onTriggered: { root.follow = true; Clock.seek(Math.round(timeMenu.time)) } }
                     MenuItem { text: "Add bookmark here…"; enabled: root.cameraId > 0; onTriggered: root.bookmarkRequested(timeMenu.time) }
+                    MenuSeparator {}
+                    MenuItem {
+                        text: "Start selection here"
+                        onTriggered: root.setSelection(timeMenu.time, root.hasSel && root.selEnd > timeMenu.time ? root.selEnd : timeMenu.time + 60000)
+                    }
+                    MenuItem {
+                        text: "End selection here"
+                        onTriggered: root.setSelection(root.hasSel && root.selStart < timeMenu.time ? root.selStart : timeMenu.time - 60000, timeMenu.time)
+                    }
+                    MenuItem {
+                        visible: root.hasSel; height: visible ? implicitHeight : 0
+                        text: "Save selection (" + root.fmtLength(root.selEnd - root.selStart) + ")…"
+                        enabled: Api.canExport
+                        onTriggered: root.saveRequested(root.selStart, root.selEnd)
+                    }
+                    MenuItem {
+                        visible: root.hasSel; height: visible ? implicitHeight : 0
+                        text: "Play selection"
+                        onTriggered: { root.follow = true; Clock.seek(root.selStart) }
+                    }
+                    MenuItem {
+                        visible: root.hasSel; height: visible ? implicitHeight : 0
+                        text: "Zoom to selection"
+                        onTriggered: { var l = root.selEnd - root.selStart; root.zoomTo(l * 1.2, root.selStart - l * 0.1, 0) }
+                    }
+                    MenuItem {
+                        visible: root.hasSel; height: visible ? implicitHeight : 0
+                        text: "Clear selection"
+                        onTriggered: root.clearSelection()
+                    }
+                    MenuSeparator {}
                     MenuItem {
                         text: "Export clip from here…"
                         enabled: root.cameraId > 0 && Api.canExport
                         onTriggered: root.exportRequested(timeMenu.time, timeMenu.time + 60000)
+                    }
+                }
+
+                // What is selected, with Save and clear (top right, over the day row).
+                Rectangle {
+                    id: selBar
+                    visible: root.hasSel
+                    z: 15
+                    anchors.right: parent.right
+                    anchors.rightMargin: 4
+                    y: 0
+                    height: 15
+                    width: selRow.implicitWidth + 12
+                    radius: 3
+                    color: "#1f3a52"
+                    border.color: "#2f6aa0"
+                    Row {
+                        id: selRow
+                        anchors.centerIn: parent
+                        spacing: 8
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: root.fmtLength(root.selEnd - root.selStart) + " selected"
+                            color: "#cfe6ff"; font.pixelSize: 10
+                        }
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            visible: Api.canExport
+                            text: "Save…"
+                            color: saveMa.containsMouse ? "white" : "#7cc4ff"
+                            font.pixelSize: 10; font.weight: Font.DemiBold
+                            MouseArea { id: saveMa; anchors.fill: parent; anchors.margins: -3; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: root.saveRequested(root.selStart, root.selEnd) }
+                        }
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "✕"
+                            color: clrMa.containsMouse ? "white" : "#8b95a1"
+                            font.pixelSize: 10
+                            MouseArea { id: clrMa; anchors.fill: parent; anchors.margins: -3; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: root.clearSelection() }
+                        }
                     }
                 }
 

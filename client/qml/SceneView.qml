@@ -17,6 +17,9 @@ Rectangle {
     property int liveBufferMs: 600
     property int searchIndex: -1       // tile showing the smart-search area
     property string searchCells: ""
+    property string selectionText: ""   // the timeline's selection, offered in each tile's menu
+    property int syncedCameras: 1
+    signal saveSelectionRequested(int index, bool all)
     property bool syncPlayback: true
     property bool showSelection: true  // blue outline on the selected tile   // false: only the selected tile follows the timeline
 
@@ -148,6 +151,9 @@ Rectangle {
             liveBufferMs: root.liveBufferMs
             qualityOverride: it.q || ""
             searchCells: root.searchIndex === index ? root.searchCells : ""
+            selectionText: root.selectionText
+            syncedCameras: root.syncedCameras
+            onSaveSelectionRequested: (all) => root.saveSelectionRequested(index, all)
             fitMode: root.fit
             showSelection: root.showSelection
             followsTimeline: root.syncPlayback || selected
