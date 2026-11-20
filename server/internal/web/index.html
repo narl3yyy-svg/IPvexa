@@ -29,6 +29,14 @@
   .brand { font-weight: 700; font-size: 16px; letter-spacing: .3px; }
   header .spacer { flex: 1; }
   header .user { color: var(--dim); font-size: 13px; }
+  header > button { flex: none; white-space: nowrap; }
+  .brand { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Phones: keep the header inside the screen so the page can't slide sideways. */
+  @media (max-width: 480px) {
+    header { gap: 6px; padding-left: 8px; padding-right: 8px; }
+    header .user { display: none; }
+    header > button { padding: 8px 8px; }
+  }
 
   /* Login */
   #login { min-height: 100vh; display: grid; place-items: center; padding: 20px; }
@@ -75,7 +83,13 @@
   .selbar button { padding: 4px 12px; font-size: 13px; }
   .selbar #selSave { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
   .selbar #selClr { background: transparent; border-color: transparent; color: var(--dim); }
-  .spansel { background: transparent; color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 4px 6px; font: inherit; font-size: 13px; }
+  .spanwrap { position: relative; display: inline-block; }
+  .controls .spanwrap > button { min-width: 64px; color: var(--text); border-color: var(--border); padding: 4px 10px; font-size: 13px; }
+  .spanmenu { position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); z-index: 20; min-width: 150px; padding: 4px;
+    background: var(--panel); border: 1px solid #36434a; border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.45); display: grid; gap: 2px; }
+  .controls .spanmenu button { display: block; width: 100%; text-align: left; border: 0; border-radius: 6px; padding: 9px 12px; font-size: 14px; font-weight: 500; color: var(--text); background: transparent; }
+  .controls .spanmenu button:hover, .controls .spanmenu button:focus-visible { background: var(--raised); outline: none; }
+  .controls .spanmenu button.on { color: var(--accent); background: #153a4d; }
   .tlwrap { position: relative; padding: 0 10px 2px; }
   .tlhead { display: flex; align-items: center; gap: 10px; padding: 8px 0 6px; }
   .datebtn { display: flex; align-items: center; gap: 10px; background: transparent; border-color: transparent; padding: 3px 8px; white-space: nowrap; min-width: 0; }
@@ -190,7 +204,8 @@
         <button id="selBtn" title="Select part of the timeline to save: drag on the timeline (or Shift+drag with a mouse)">Select</button>
         <span class="grow"></span>
         <button id="zoomOut" title="Zoom out" aria-label="Zoom out">−</button>
-        <select id="spanSel" class="spansel" title="Show 1 hour, 1 day, 1 week, or the whole day" aria-label="Timeline length"><option value="" hidden>2h</option><option value="3600000">1 hour</option><option value="86400000">1 day</option><option value="604800000">1 week</option><option value="day">Whole day</option></select>
+        <span class="spanwrap"><button id="spanBtn" title="Show 1 hour, 1 day, 1 week, or the whole day" aria-haspopup="menu" aria-expanded="false">2h ▾</button>
+          <div class="spanmenu hidden" id="spanMenu" role="menu"><button role="menuitem" data-v="3600000">1 hour</button><button role="menuitem" data-v="86400000">1 day</button><button role="menuitem" data-v="604800000">1 week</button><button role="menuitem" data-v="day">Whole day</button></div></span>
         <button id="zoomIn" title="Zoom in" aria-label="Zoom in">+</button>
         <span class="grow"></span>
         <span class="seg" title="Picture quality"><button id="qSD" class="on">SD</button><button id="qHD">HD</button></span>
@@ -332,7 +347,7 @@ function showCamera(id, t) {
   $("title").textContent = c.name;
   const canPlay = S.me.role === "admin" || S.perms.playback;
   $("tl").classList.toggle("hidden", !canPlay); $("strip").classList.toggle("hidden", !canPlay); $("dateBtn").disabled = !canPlay;
-  ["prevEv", "nextEv", "back30", "fwd30", "playBtn", "speedBtn", "zoomOut", "zoomIn", "spanSel"].forEach((x) => $(x).classList.toggle("hidden", !canPlay));
+  ["prevEv", "nextEv", "back30", "fwd30", "playBtn", "speedBtn", "zoomOut", "zoomIn", "spanBtn"].forEach((x) => $(x).classList.toggle("hidden", !canPlay));
   $("selBtn").classList.toggle("hidden", !canPlay || !(S.me.role === "admin" || S.perms.export));
   TL.sel = null; TL.selMode = false; selUpdate();
   S.speed = 1; S.paused = false; updateSpeed();
@@ -524,12 +539,25 @@ $("speedBtn").onclick = () => {
 };
 $("zoomOut").onclick = () => tlZoomTo((TL.end - TL.start) * 2, position(), 0.5);
 $("zoomIn").onclick = () => tlZoomTo((TL.end - TL.start) / 2, position(), 0.5);
-$("spanSel").onchange = (e) => {
-  const v = e.target.value;
-  e.target.selectedIndex = 0;
+// Timeline length menu (drawn by the page, so it matches the theme and stays
+// open on phones while the timeline keeps updating).
+function spanMenu(open) {
+  $("spanMenu").classList.toggle("hidden", !open);
+  $("spanBtn").setAttribute("aria-expanded", open ? "true" : "false");
+  if (!open) return;
+  const span = TL.end - TL.start;
+  $("spanMenu").querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.v !== "day" && Math.abs(+b.dataset.v - span) < 1000));
+}
+$("spanBtn").onclick = (e) => { e.stopPropagation(); spanMenu($("spanMenu").classList.contains("hidden")); };
+$("spanMenu").querySelectorAll("button").forEach((b) => (b.onclick = (e) => {
+  e.stopPropagation();
+  const v = b.dataset.v;
+  spanMenu(false);
   if (v === "day") { const d = startOfDay(position()); tlZoomTo(addDays(d, 1) - d, d, 0); }
-  else if (v) tlZoomTo(+v, position(), v === "604800000" ? 0.85 : 0.75);
-};
+  else tlZoomTo(+v, position(), v === "604800000" ? 0.85 : 0.75);
+}));
+document.addEventListener("pointerdown", (e) => { if (!e.target.closest(".spanwrap")) spanMenu(false); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") spanMenu(false); });
 // Jump to the previous / next motion or bookmark from the playhead.
 function jumpEvent(dir) {
   const p = position();
@@ -579,7 +607,8 @@ function tlTick() {
   $("clockTxt").textContent = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
   $("dateTxt").textContent = d.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" });
   const m = span / 60000;
-  $("spanSel").options[0].text = m < 60 ? Math.round(m) + "m" : m < 1440 ? Math.round(m / 60) + "h" : Math.round(m / 1440) + "d";
+  const spanTxt = (m < 60 ? Math.round(m) + "m" : m < 1440 ? Math.round(m / 60) + "h" : Math.round(m / 1440) + "d") + " ▾";
+  if ($("spanBtn").textContent !== spanTxt) $("spanBtn").textContent = spanTxt;
   $("liveBtn").textContent = $("liveBtn").classList.contains("on") ? "● LIVE" : "Go live";
   markClip(p);
   $("dateBtn").classList.toggle("rec", !!S.playFrom || S.paused);
