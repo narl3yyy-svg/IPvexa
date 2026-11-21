@@ -118,6 +118,11 @@
   .events li.cur { border-color: var(--accent); background: #12293a; }
   .events li.cur .t { color: #9cc8ff; }
   .empty { color: var(--faint); padding: 10px 14px; font-size: 13px; }
+  .nocams { grid-column: 1 / -1; justify-self: center; align-self: start; max-width: 460px; margin: 12vh 16px 0; padding: 22px 24px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px; color: var(--dim); font-size: 14px; line-height: 1.55; }
+  .nocams h2 { margin: 0 0 8px; font-size: 17px; color: var(--text); }
+  .nocams ol { margin: 8px 0 0; padding-left: 20px; }
+  .nocams b { color: var(--text); }
 
   /* Calendar: days with recordings are marked (red: motion) and only they can be picked. */
   .cal { position: absolute; bottom: calc(100% - 6px); left: 10px; z-index: 10; width: 284px; max-width: calc(100% - 20px); background: var(--panel); border: 1px solid #36434a;
@@ -273,7 +278,16 @@ function showGrid() {
   $("view").classList.add("hidden"); $("grid").classList.remove("hidden"); $("back").classList.add("hidden");
   $("title").textContent = "IPvexa";
   const g = $("grid");
-  if (!S.cams.length) { g.innerHTML = '<div class="empty">No cameras you can view.</div>'; return; }
+  if (!S.cams.length) {
+    g.innerHTML = S.me.role === "admin"
+      ? `<div class="nocams"><h2>No cameras on this server yet</h2>Cameras are added in the IPvexa desktop app:<ol>
+        <li>Open IPvexa and sign in to <b>${esc(location.host)}</b> as an administrator.</li>
+        <li>Click <b>Add camera</b> at the bottom of the left panel.</li>
+        <li>Enter the camera's address, user name and password.</li></ol>
+        <p style="margin:10px 0 0">They show up here straight away.</p></div>`
+      : '<div class="empty">No cameras you can view. Ask an administrator to give you access.</div>';
+    return;
+  }
   g.innerHTML = S.cams.map((c) => {
     const st = c.status && c.status.main ? c.status.main.state : "offline";
     return `<div class="tile" data-id="${c.id}"><img alt="" data-id="${c.id}"><div class="msg">${c.enabled ? "Loading…" : "Disabled"}</div>

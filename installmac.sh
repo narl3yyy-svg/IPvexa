@@ -44,6 +44,7 @@ PLIST="/Library/LaunchDaemons/$LABEL.plist"
 BIN="/usr/local/bin/ipvexa-server"
 DATA="/Library/Application Support/IPvexa"
 APP="/Applications/IPvexa.app"
+FRESH=0; [[ -f "$DATA/ipvexa.db" ]] || FRESH=1   # first install: no cameras yet
 FIREWALL="/usr/libexec/ApplicationFirewall/socketfilterfw"
 
 stop_server() {
@@ -234,6 +235,16 @@ if [[ $WHAT != client ]]; then
   [[ -n "$ip" ]] || ip="<this Mac's address>"
   echo "    Web/phones:  http://$ip:7480"
   echo "    Cameras' time server (NTP): $ip, port 123"
+  # A new server has no cameras; the web view and phones show them once added.
+  if [[ $FRESH == 1 ]]; then
+    echo
+    say "Next: add your cameras"
+    echo "    1. Open IPvexa (Launchpad or /Applications)."
+    echo "    2. Server: localhost:7480 (on another computer: $ip:7480). Sign in as admin."
+    echo "    3. Click \"Add camera\" at the bottom of the left panel and enter the camera's"
+    echo "       address, user and password (or its RTSP address)."
+    echo "    Until a camera is added, the web page says \"No cameras on this server yet\"."
+  fi
 fi
 if [[ $WHAT != server ]]; then
   echo "    Desktop app: open IPvexa from Launchpad or /Applications"

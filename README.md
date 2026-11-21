@@ -84,6 +84,8 @@ cd IPvexa
 
 The installer adds Go, Qt and FFmpeg with Homebrew. The server is installed as a background service that starts with the Mac, and **IPvexa.app** goes in `/Applications`. The first time the app opens, macOS asks for local network access: choose **Allow**.
 
+A new server starts with no cameras, so the web page shows **No cameras on this server yet** until you add one. Open IPvexa, sign in to `localhost:7480` as `admin` with the password the installer printed, and click **+ Add camera**. The installer prints these steps at the end of a first install.
+
 <details>
 <summary><b>Installer options</b></summary>
 
@@ -98,7 +100,7 @@ The installer adds Go, Qt and FFmpeg with Homebrew. The server is installed as a
 The app uses Homebrew's Qt and FFmpeg, so run the installer again after `brew upgrade`. Intel Macs are not supported.
 
 > [!NOTE]
-> The macOS installer is new and has not yet been run on a real Mac. Please open an issue if anything goes wrong.
+> The macOS installer is new. Please open an issue if anything goes wrong.
 
 </details>
 
