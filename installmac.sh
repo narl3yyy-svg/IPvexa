@@ -201,6 +201,11 @@ fi
 if [[ $WHAT != server ]]; then
   say "Building the desktop app"
   build="$ROOT/client/build-mac"
+  # A build made before the IPvexa folder was moved or renamed can't be reused.
+  if [[ -f "$build/CMakeCache.txt" ]] && ! grep -qxF "CMAKE_HOME_DIRECTORY:INTERNAL=$ROOT/client" "$build/CMakeCache.txt"; then
+    say "The IPvexa folder has moved since the last build; building the app from scratch"
+    rm -rf "$build"
+  fi
   cmake -S "$ROOT/client" -B "$build" -G Ninja -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_PREFIX_PATH="$("$BREW" --prefix qt)" >/dev/null
   cmake --build "$build"
