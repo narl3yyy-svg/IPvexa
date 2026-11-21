@@ -206,7 +206,11 @@ if [[ $WHAT != server ]]; then
     say "The IPvexa folder has moved since the last build; building the app from scratch"
     rm -rf "$build"
   fi
+  # Homebrew's Qt and FFmpeg are built for this Mac's macOS, so the app is too
+  # (an older target only adds "built for newer macOS version" link warnings).
+  osver="$(sw_vers -productVersion | cut -d. -f1-2)"
   cmake -S "$ROOT/client" -B "$build" -G Ninja -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_OSX_DEPLOYMENT_TARGET="$osver" \
     -DCMAKE_PREFIX_PATH="$("$BREW" --prefix qt)" >/dev/null
   cmake --build "$build"
 

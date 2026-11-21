@@ -10,6 +10,11 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET libavformat libavcodec libavutil libswscale)
 
 qt_standard_project_setup(REQUIRES 6.5)
+# Newer Qt (6.8+) asks for this: give the qml/ folder its own qmldir. Older Qt
+# doesn't know the policy, so only set it where it exists.
+if(QT_KNOWN_POLICY_QTP0004)
+    qt_policy(SET QTP0004 NEW)
+endif()
 
 qt_add_executable(ipvexa
     src/main.cpp
